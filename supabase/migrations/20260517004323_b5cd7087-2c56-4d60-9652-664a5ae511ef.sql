@@ -1,0 +1,1 @@
+DELETE FROM public.products WHERE id IN (SELECT id FROM public.products WHERE store_id='86b3da2d-a69f-455a-a301-e6249f2542eb' AND name='CARGA INFINIX 11 PLAY' ORDER BY created_at LIMIT 1);

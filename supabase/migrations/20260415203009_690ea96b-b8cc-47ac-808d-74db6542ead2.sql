@@ -1,0 +1,9 @@
+ALTER PUBLICATION supabase_realtime ADD TABLE public.products;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.customers;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.categories;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.sales;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.stock_movements;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.deliveries;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.returns;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.store_settings;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.payments;

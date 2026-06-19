@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ADD COLUMN show_onboarding_guide boolean NOT NULL DEFAULT true;
