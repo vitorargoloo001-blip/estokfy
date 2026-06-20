@@ -60,7 +60,9 @@ const ServiceOrderDetail = lazy(() => import("./pages/ServiceOrders/Detail"));
 const ConnectIndex = lazy(() => import("./pages/Connect/Index"));
 const ConnectConnections = lazy(() => import("./pages/Connect/Connections"));
 const ConnectTransactions = lazy(() => import("./pages/Connect/Transactions"));
-const ConnectReconciliation = lazy(() => import("./pages/Connect/Reconciliation"));
+const ConnectReconciliation = lazy(() => import("./pages/Connect/ConnectReconciliation"));
+const ConnectReports = lazy(() => import("./pages/Connect/ConnectReports"));
+const ConnectAlerts = lazy(() => import("./pages/Connect/ConnectAlerts"));
 const ConnectDiscrepancies = lazy(() => import("./pages/Connect/Discrepancies"));
 const ConnectAudit = lazy(() => import("./pages/Connect/ConnectAudit"));
 const ConnectSettings = lazy(() => import("./pages/Connect/Settings"));
@@ -149,6 +151,8 @@ function ProtectedRoutes() {
             <Route path="connect/divergencias" element={<RequireConnectModule><ConnectDiscrepancies /></RequireConnectModule>} />
             <Route path="connect/auditoria" element={<RequireConnectModule><ConnectAudit /></RequireConnectModule>} />
             <Route path="connect/configuracoes" element={<RequireConnectModule><ConnectSettings /></RequireConnectModule>} />
+            <Route path="connect/relatorios" element={<RequireConnectModule><ConnectReports /></RequireConnectModule>} />
+            <Route path="connect/alertas" element={<RequireConnectModule><ConnectAlerts /></RequireConnectModule>} />
             <Route path="ajuda" element={<Help />} />
           </Route>
           <Route path="apresentacao" element={<Presentation />} />

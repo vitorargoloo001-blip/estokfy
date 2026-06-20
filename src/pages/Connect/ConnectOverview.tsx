@@ -4,9 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
+import {
   BarChart3, CheckCircle2, AlertCircle, Clock,
   Plug2, ArrowRight, Play, Trash2, Database, RefreshCw,
-  TrendingUp, Banknote, Activity, Zap,
+  TrendingUp, Banknote, Activity, Zap, Bell,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSuperAdmin } from "@/hooks/useSuperAdmin";
@@ -17,6 +21,7 @@ interface DashboardKPIs {
   received_today: number;
   received_month: number;
   auto_reconciled: number;
+  manual_reconciled: number;
   pending_reconciliation: number;
   divergent: number;
   banks_connected: number;
@@ -26,39 +31,69 @@ interface DashboardKPIs {
   reconciliation_rate: number;
 }
 
+interface TrendPoint {
+  date: string;
+  reconciled: number;
+  divergent: number;
+  pending: number;
+}
+
+interface MethodPoint {
+  method: string;
+  total_count: number;
+  reconciled_count: number;
+  total_amount: number;
+}
+
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v ?? 0);
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
 
+const METHOD_LABEL: Record<string, string> = {
+  pix: "PIX", ted: "TED", doc: "DOC", boleto: "Boleto",
+  credit_card: "Cartão", debit_card: "Débito", other: "Outro",
+};
+
 export default function ConnectOverview() {
   const { profile } = useAuth();
   const { isSuperAdmin } = useSuperAdmin();
 
   const [kpis, setKpis] = useState<DashboardKPIs | null>(null);
+  const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [methods, setMethods] = useState<MethodPoint[]>([]);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [loading, setLoading] = useState(true);
   const [hasDemoData, setHasDemoData] = useState(false);
 
-  const [seeding, setSeeding] = useState(false);
-  const [clearing, setClearing] = useState(false);
-  const [matching, setMatching] = useState(false);
+  const [seeding, setSeeding]       = useState(false);
+  const [clearing, setClearing]     = useState(false);
+  const [matching, setMatching]     = useState(false);
+  const [scenario, setScenario]     = useState(false);
+  const [trendPeriod, setTrendPeriod] = useState<"week" | "month" | "quarter">("month");
 
   const loadKPIs = useCallback(async () => {
     if (!profile?.store_id) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc("connect_get_dashboard_kpis", {
-        p_store_id: profile.store_id,
-      });
-      if (error) throw error;
-      setKpis(data as DashboardKPIs);
+      const [kpiRes, trendRes, methodRes, alertRes] = await Promise.all([
+        supabase.rpc("connect_get_dashboard_kpis", { p_store_id: profile.store_id }),
+        supabase.rpc("get_reconciliation_trend_by_period", { p_store_id: profile.store_id, p_period: trendPeriod }),
+        supabase.rpc("get_reconciliation_by_method", { p_store_id: profile.store_id, p_period_days: 30 }),
+        supabase.rpc("get_unread_alert_count", { p_store_id: profile.store_id }),
+      ]);
+      if (kpiRes.error) throw kpiRes.error;
+      setKpis(kpiRes.data as DashboardKPIs);
+      setTrend((trendRes.data as TrendPoint[]) || []);
+      setMethods((methodRes.data as MethodPoint[]) || []);
+      setUnreadAlerts((alertRes.data as number) || 0);
     } catch (e) {
       console.error("Connect KPI error:", e);
     } finally {
       setLoading(false);
     }
-  }, [profile?.store_id]);
+  }, [profile?.store_id, trendPeriod]);
 
   const checkDemoData = useCallback(async () => {
     if (!profile?.store_id || !isSuperAdmin) return;
@@ -85,8 +120,9 @@ export default function ConnectOverview() {
       const d = data as any;
       toast.success(
         `Demonstração criada! ${d.transactions_created} transações, ` +
-        `${d.matches_created} sugestões de conciliação` +
-        (d.sales_linked > 0 ? `, ${d.sales_linked} vinculadas a vendas reais` : "") + "."
+        `${d.matches_created} sugestões` +
+        (d.sales_linked > 0 ? `, ${d.sales_linked} vinculadas a vendas reais` : "") +
+        (d.alerts_active > 0 ? `, ${d.alerts_active} alertas.` : ".")
       );
       await Promise.all([loadKPIs(), checkDemoData()]);
     } catch (e: any) {
@@ -113,6 +149,27 @@ export default function ConnectOverview() {
     }
   };
 
+  const seedScenario = async () => {
+    if (!profile?.store_id) return;
+    setScenario(true);
+    try {
+      const { data, error } = await supabase.rpc("connect_seed_scenario_completo", {
+        p_store_id: profile.store_id,
+      });
+      if (error) throw error;
+      const d = data as any;
+      toast.success(
+        `Cenário completo gerado! ${d.transactions_created} transações, ` +
+        `${d.matches_created} conciliações, ${d.alerts_created} alertas.`
+      );
+      await Promise.all([loadKPIs(), checkDemoData()]);
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao gerar cenário completo");
+    } finally {
+      setScenario(false);
+    }
+  };
+
   const runMatching = async () => {
     if (!profile?.store_id) return;
     setMatching(true);
@@ -126,7 +183,7 @@ export default function ConnectOverview() {
         toast.info("Nenhuma transação pendente sem correspondência.");
       } else {
         toast.success(
-          `Conciliação executada! ${d.matches_created} correspondência(s) criada(s)` +
+          `Conciliação executada! ${d.matches_created} correspondência(s)` +
           (d.no_match > 0 ? `, ${d.no_match} sem correspondência.` : ".")
         );
       }
@@ -139,6 +196,7 @@ export default function ConnectOverview() {
   };
 
   const isEmpty = !loading && kpis?.banks_connected === 0;
+  const hasTrend = trend.some((d) => d.reconciled + d.divergent + d.pending > 0);
 
   return (
     <div className="space-y-6">
@@ -149,9 +207,7 @@ export default function ConnectOverview() {
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-2">
                 <Database className="h-5 w-5 text-purple-600" />
-                <span className="font-semibold text-purple-900 text-sm">
-                  Modo Demonstração
-                </span>
+                <span className="font-semibold text-purple-900 text-sm">Modo Demonstração</span>
                 {hasDemoData && (
                   <Badge className="bg-purple-100 text-purple-700 border-purple-300 border">
                     Dados ativos
@@ -159,6 +215,17 @@ export default function ConnectOverview() {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
+                {/* Cenário completo — sempre disponível para super admin */}
+                <Button
+                  size="sm"
+                  onClick={seedScenario}
+                  disabled={scenario}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {scenario
+                    ? <><RefreshCw className="h-4 w-4 mr-1 animate-spin" />Gerando cenário...</>
+                    : <><Zap className="h-4 w-4 mr-1" />Gerar cenário completo</>}
+                </Button>
                 {!hasDemoData ? (
                   <Button
                     size="sm"
@@ -168,8 +235,7 @@ export default function ConnectOverview() {
                   >
                     {seeding
                       ? <><RefreshCw className="h-4 w-4 mr-1 animate-spin" />Gerando...</>
-                      : <><Play className="h-4 w-4 mr-1" />Gerar dados de demonstração</>
-                    }
+                      : <><Play className="h-4 w-4 mr-1" />Demo básico</>}
                   </Button>
                 ) : (
                   <>
@@ -182,8 +248,7 @@ export default function ConnectOverview() {
                     >
                       {matching
                         ? <><RefreshCw className="h-4 w-4 mr-1 animate-spin" />Executando...</>
-                        : <><Activity className="h-4 w-4 mr-1" />Executar conciliação automática</>
-                      }
+                        : <><Activity className="h-4 w-4 mr-1" />Conciliação automática</>}
                     </Button>
                     <Button
                       size="sm"
@@ -194,8 +259,7 @@ export default function ConnectOverview() {
                     >
                       {clearing
                         ? <><RefreshCw className="h-4 w-4 mr-1 animate-spin" />Limpando...</>
-                        : <><Trash2 className="h-4 w-4 mr-1" />Limpar demo</>
-                      }
+                        : <><Trash2 className="h-4 w-4 mr-1" />Limpar demo</>}
                     </Button>
                   </>
                 )}
@@ -220,7 +284,7 @@ export default function ConnectOverview() {
             <div>
               <h3 className="text-lg font-semibold">Nenhum banco conectado</h3>
               <p className="text-sm text-muted-foreground mt-2 max-w-sm mx-auto">
-                Conecte sua conta bancária para começar a conciliar automaticamente suas transações com as vendas do sistema.
+                Conecte sua conta bancária para começar a conciliar automaticamente.
               </p>
             </div>
             <Button asChild>
@@ -233,6 +297,23 @@ export default function ConnectOverview() {
       {/* KPI Grid */}
       {!loading && kpis && !isEmpty && (
         <>
+          {/* Alertas badge */}
+          {unreadAlerts > 0 && (
+            <Link to="/connect/alertas">
+              <Card className="border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors cursor-pointer">
+                <CardContent className="pt-3 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-orange-600" />
+                    <span className="text-sm font-medium text-orange-800">
+                      {unreadAlerts} alerta(s) não lido(s)
+                    </span>
+                    <ArrowRight className="h-4 w-4 text-orange-600 ml-auto" />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          )}
+
           {/* Linha 1: Financeiro */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card>
@@ -281,27 +362,32 @@ export default function ConnectOverview() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{kpis.banks_connected}</div>
-                <p className="text-xs text-muted-foreground">
-                  Sync: {fmtDate(kpis.last_sync)}
-                </p>
+                <p className="text-xs text-muted-foreground">Sync: {fmtDate(kpis.last_sync)}</p>
               </CardContent>
             </Card>
           </div>
 
           {/* Linha 2: Status de conciliação */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium">Conciliado automaticamente</CardTitle>
                 <Zap className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {kpis.auto_reconciled}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Matches confirmados pelo motor 3-pass
-                </p>
+                <div className="text-2xl font-bold text-green-600">{kpis.auto_reconciled}</div>
+                <p className="text-xs text-muted-foreground">Motor 3-pass</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">Conciliado manualmente</CardTitle>
+                <CheckCircle2 className="h-4 w-4 text-teal-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-teal-600">{kpis.manual_reconciled ?? 0}</div>
+                <p className="text-xs text-muted-foreground">Vinculação humana</p>
               </CardContent>
             </Card>
 
@@ -315,10 +401,7 @@ export default function ConnectOverview() {
                   {kpis.pending_reconciliation}
                 </div>
                 {kpis.pending_reconciliation > 0 ? (
-                  <Link
-                    to="/connect/conciliacao"
-                    className="text-xs text-primary hover:underline flex items-center gap-1 mt-1"
-                  >
+                  <Link to="/connect/conciliacao" className="text-xs text-primary hover:underline flex items-center gap-1 mt-1">
                     Revisar agora <ArrowRight className="h-3 w-3" />
                   </Link>
                 ) : (
@@ -337,10 +420,7 @@ export default function ConnectOverview() {
                   {kpis.divergent}
                 </div>
                 {kpis.divergent > 0 ? (
-                  <Link
-                    to="/connect/divergencias"
-                    className="text-xs text-primary hover:underline flex items-center gap-1 mt-1"
-                  >
+                  <Link to="/connect/divergencias" className="text-xs text-primary hover:underline flex items-center gap-1 mt-1">
                     Ver divergências <ArrowRight className="h-3 w-3" />
                   </Link>
                 ) : (
@@ -349,17 +429,107 @@ export default function ConnectOverview() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Trend chart */}
+          {hasTrend && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base">
+                  Tendência —{" "}
+                  {trendPeriod === "week" ? "Últimos 7 dias" : trendPeriod === "month" ? "Últimos 30 dias" : "Último trimestre"}
+                </CardTitle>
+                <div className="flex gap-1">
+                  {(["week", "month", "quarter"] as const).map((p) => (
+                    <Button
+                      key={p}
+                      size="sm"
+                      variant={trendPeriod === p ? "default" : "outline"}
+                      className="h-7 text-xs"
+                      onClick={() => setTrendPeriod(p)}
+                    >
+                      {p === "week" ? "7d" : p === "month" ? "30d" : "90d"}
+                    </Button>
+                  ))}
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={trend} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                    <defs>
+                      <linearGradient id="colorRec" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorDiv" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(d) =>
+                        new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
+                      }
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip
+                      labelFormatter={(l) => new Date(l).toLocaleDateString("pt-BR")}
+                      formatter={(v, n) => [v, n === "reconciled" ? "Conciliadas" : n === "divergent" ? "Divergentes" : "Pendentes"]}
+                    />
+                    <Legend formatter={(v) => v === "reconciled" ? "Conciliadas" : v === "divergent" ? "Divergentes" : "Pendentes"} />
+                    <Area type="monotone" dataKey="reconciled" stroke="#10b981" fill="url(#colorRec)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="divergent" stroke="#ef4444" fill="url(#colorDiv)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="pending" stroke="#f59e0b" fill="none" strokeDasharray="4 2" strokeWidth={1.5} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Method breakdown */}
+          {methods.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Breakdown por método de pagamento (30 dias)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={methods} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis
+                      dataKey="method"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(m) => METHOD_LABEL[m] ?? m}
+                    />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip
+                      formatter={(v, n) => [v, n === "total_count" ? "Total" : "Conciliadas"]}
+                      labelFormatter={(l) => METHOD_LABEL[l] ?? l}
+                    />
+                    <Legend formatter={(v) => v === "total_count" ? "Total" : "Conciliadas"} />
+                    <Bar dataKey="total_count" fill="#6366f1" name="total_count" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="reconciled_count" fill="#10b981" name="reconciled_count" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
 
       {/* Grade de navegação */}
       {!loading && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { to: "/connect/bancos",         icon: "🏦", label: "Bancos",        desc: "Gerenciar conexões" },
             { to: "/connect/transacoes",      icon: "💳", label: "Transações",    desc: "Histórico completo" },
             { to: "/connect/conciliacao",     icon: "⚡", label: "Conciliação",   desc: "Revisar pendências" },
             { to: "/connect/divergencias",    icon: "⚠️", label: "Divergências",  desc: "Analisar problemas" },
+            { to: "/connect/relatorios",      icon: "📊", label: "Relatórios",    desc: "PDF / Excel / CSV" },
+            { to: "/connect/alertas",         icon: "🔔", label: "Alertas",       desc: unreadAlerts > 0 ? `${unreadAlerts} não lido(s)` : "Notificações" },
             { to: "/connect/auditoria",       icon: "📋", label: "Auditoria",     desc: "Histórico de ações" },
             { to: "/connect/configuracoes",   icon: "⚙️", label: "Configurações", desc: "Ajustar parâmetros" },
           ].map(({ to, icon, label, desc }) => (
