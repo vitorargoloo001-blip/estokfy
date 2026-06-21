@@ -10,7 +10,7 @@ import {
 import {
   BarChart3, CheckCircle2, AlertCircle, Clock,
   Plug2, ArrowRight, Play, Trash2, Database, RefreshCw,
-  TrendingUp, Banknote, Activity, Zap, Bell,
+  TrendingUp, Banknote, Activity, Zap, Bell, Brain, Heart,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSuperAdmin } from "@/hooks/useSuperAdmin";
@@ -78,6 +78,7 @@ export default function ConnectOverview() {
   const [methods, setMethods] = useState<MethodPoint[]>([]);
   const [monthComp, setMonthComp] = useState<MonthComparison | null>(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [aiInsightCount, setAiInsightCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [hasDemoData, setHasDemoData] = useState(false);
 
@@ -101,6 +102,7 @@ export default function ConnectOverview() {
         supabase.rpc("get_reconciliation_by_method", { p_store_id: profile.store_id, p_start_date: monthStart }),
         supabase.rpc("get_monthly_comparison", { p_store_id: profile.store_id }),
         supabase.rpc("get_unread_alert_count", { p_store_id: profile.store_id }),
+        supabase.rpc("get_ai_insights", { p_store_id: profile.store_id, p_include_dismissed: false, p_limit: 1 }),
       ]);
       if (kpiRes.error) throw kpiRes.error;
       setKpis(kpiRes.data as DashboardKPIs);
@@ -108,6 +110,12 @@ export default function ConnectOverview() {
       setMethods((methodRes.data as MethodPoint[]) || []);
       setMonthComp(compRes.data as MonthComparison | null);
       setUnreadAlerts((alertRes.data as number) || 0);
+      // ai insights count via second param (we only fetch 1 to check existence)
+      // full count via separate small call
+      const { data: aiData } = await supabase.rpc("get_ai_insights", {
+        p_store_id: profile.store_id, p_include_dismissed: false, p_limit: 100,
+      });
+      setAiInsightCount((aiData as unknown[])?.length ?? 0);
     } catch (e) {
       console.error("Connect KPI error:", e);
     } finally {
@@ -593,9 +601,12 @@ export default function ConnectOverview() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { to: "/connect/bancos",         icon: "🏦", label: "Bancos",        desc: "Gerenciar conexões" },
+            { to: "/connect/saude",           icon: "💚", label: "Saúde",         desc: "Monitor de conexão" },
             { to: "/connect/transacoes",      icon: "💳", label: "Transações",    desc: "Histórico completo" },
             { to: "/connect/conciliacao",     icon: "⚡", label: "Conciliação",   desc: "Revisar pendências" },
             { to: "/connect/divergencias",    icon: "⚠️", label: "Divergências",  desc: "Analisar problemas" },
+            { to: "/connect/insights",        icon: "🧠", label: "IA Financeira", desc: aiInsightCount > 0 ? `${aiInsightCount} insight(s)` : "Análise automática" },
+            { to: "/connect/fluxo",           icon: "📈", label: "Fluxo de Caixa", desc: "Previsão financeira" },
             { to: "/connect/relatorios",      icon: "📊", label: "Relatórios",    desc: "PDF / Excel / CSV" },
             { to: "/connect/alertas",         icon: "🔔", label: "Alertas",       desc: unreadAlerts > 0 ? `${unreadAlerts} não lido(s)` : "Notificações" },
             { to: "/connect/auditoria",       icon: "📋", label: "Auditoria",     desc: "Histórico de ações" },

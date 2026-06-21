@@ -273,65 +273,290 @@ export default function ConnectReports() {
     try {
       const { default: jsPDF } = await import("jspdf");
       const { default: autoTable } = await import("jspdf-autotable");
-      const doc = new jsPDF();
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pw = doc.internal.pageSize.getWidth();
+      const ph = doc.internal.pageSize.getHeight();
+      const generatedAt = new Date().toLocaleString("pt-BR", { dateStyle: "long", timeStyle: "short" });
 
-      doc.setFontSize(16); doc.setFont("helvetica", "bold");
-      doc.text("Relatório de Conciliação", pw / 2, 18, { align: "center" });
-      doc.setFontSize(10); doc.setFont("helvetica", "normal");
-      doc.text("Estokfy Connect", pw / 2, 25, { align: "center" });
-      doc.text(`Período: ${fmtDate(summary.period_start)} a ${fmtDate(summary.period_end)}`, pw / 2, 31, { align: "center" });
-      doc.text(`Gerado em: ${fmtDateTime(new Date().toISOString())}`, pw / 2, 37, { align: "center" });
+      // ── Capa ──────────────────────────────────────────────────────────
+      // Fundo gradiente simulado (retângulo azul)
+      doc.setFillColor(37, 99, 235);
+      doc.rect(0, 0, pw, 70, "F");
+      doc.setFillColor(30, 64, 175);
+      doc.rect(0, 55, pw, 15, "F");
 
-      autoTable(doc, {
-        startY: 44,
-        head: [["Indicador", "Quantidade", "Valor"]],
-        body: [
-          ["Total de transações", String(summary.total_transactions), fmtBRL(summary.total_amount)],
-          ["✅ Conciliadas", String(summary.reconciled_count), fmtBRL(summary.reconciled_amount)],
-          ["⚠️ Divergentes", String(summary.divergent_count), fmtBRL(summary.divergent_amount)],
-          ["⏳ Pendentes", String(summary.pending_count), fmtBRL(summary.pending_amount)],
-          ["—  Ignoradas", String(summary.ignored_count), "—"],
-          ["Taxa de conciliação", `${summary.reconciliation_rate}%`, ""],
-        ],
-        headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-        columnStyles: { 2: { halign: "right" } },
-        margin: { left: 14, right: 14 }, styles: { fontSize: 10 },
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.text("Estokfy Connect", pw / 2, 24, { align: "center" });
+
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "normal");
+      doc.text("Relatório Executivo de Conciliação Bancária", pw / 2, 34, { align: "center" });
+
+      doc.setFontSize(10);
+      doc.text(`Período: ${fmtDate(summary.period_start)} a ${fmtDate(summary.period_end)}`, pw / 2, 45, { align: "center" });
+      doc.text(`Gerado em: ${generatedAt}`, pw / 2, 52, { align: "center" });
+
+      // Linha separadora dourada
+      doc.setDrawColor(250, 204, 21);
+      doc.setLineWidth(1);
+      doc.line(14, 70, pw - 14, 70);
+
+      // ── Resumo Executivo ──────────────────────────────────────────────
+      doc.setTextColor(17, 24, 39);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text("1. Resumo Executivo", 14, 82);
+
+      const rate = summary.reconciliation_rate;
+      const rateStatus = rate >= 80 ? "EXCELENTE" : rate >= 60 ? "REGULAR" : "CRÍTICO";
+      const summaryLines = [
+        `No período de ${fmtDate(summary.period_start)} a ${fmtDate(summary.period_end)}, foram identificadas`,
+        `${summary.total_transactions} transações bancárias totalizando ${fmtBRL(summary.total_amount)}.`,
+        ``,
+        `A taxa de conciliação foi de ${rate}% (${rateStatus}), com ${summary.reconciled_count} transações`,
+        `conciliadas (${fmtBRL(summary.reconciled_amount)}). Foram detectadas ${summary.divergent_count}`,
+        `divergências (${fmtBRL(summary.divergent_amount)}) e ${summary.pending_count} transações permanecem`,
+        `aguardando revisão manual.`,
+      ];
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      let curY = 89;
+      summaryLines.forEach((line) => {
+        if (line === "") { curY += 3; return; }
+        doc.text(line, 14, curY);
+        curY += 5.5;
       });
 
-      if (methodBreakdown.length > 0) {
-        const lastY1 = (doc as any).lastAutoTable?.finalY ?? 120;
+      // KPI boxes na capa
+      curY += 4;
+      const boxW = (pw - 28 - 9) / 4;
+      const boxes = [
+        { label: "Total TXs",       val: String(summary.total_transactions), color: [37, 99, 235] as [number,number,number] },
+        { label: "Conciliadas",      val: String(summary.reconciled_count),  color: [5, 150, 105] as [number,number,number] },
+        { label: "Divergências",     val: String(summary.divergent_count),   color: [220, 38, 38] as [number,number,number] },
+        { label: "Taxa Conc.",       val: `${rate}%`,                        color: rate >= 80 ? [5,150,105] as [number,number,number] : [202,138,4] as [number,number,number] },
+      ];
+      boxes.forEach((b, i) => {
+        const bx = 14 + i * (boxW + 3);
+        doc.setFillColor(...b.color);
+        doc.roundedRect(bx, curY, boxW, 18, 2, 2, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(14);
+        doc.text(b.val, bx + boxW / 2, curY + 9, { align: "center" });
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.text(b.label, bx + boxW / 2, curY + 15, { align: "center" });
+      });
+      doc.setTextColor(17, 24, 39);
+      curY += 24;
+
+      // ── 2. Conciliação automática vs manual ───────────────────────────
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text("2. Conciliação — Automática vs Manual", 14, curY + 8);
+      curY += 12;
+
+      const autoRec   = filtered.filter((t) => t.status === "reconciled" && t.match_type === "automatic");
+      const manualRec = filtered.filter((t) => t.status === "reconciled" && t.match_type === "manual");
+      const autoAmt   = autoRec.reduce((s, t) => s + (t.amount ?? 0), 0);
+      const manualAmt = manualRec.reduce((s, t) => s + (t.amount ?? 0), 0);
+
+      autoTable(doc, {
+        startY: curY,
+        head: [["Tipo", "Qtd Transações", "Valor Total", "% do Conciliado"]],
+        body: [
+          ["Automática (engine 3-pass)",
+            String(autoRec.length),
+            fmtBRL(autoAmt),
+            summary.reconciled_count > 0 ? `${((autoRec.length / summary.reconciled_count) * 100).toFixed(1)}%` : "—"],
+          ["Manual (revisão humana)",
+            String(manualRec.length),
+            fmtBRL(manualAmt),
+            summary.reconciled_count > 0 ? `${((manualRec.length / summary.reconciled_count) * 100).toFixed(1)}%` : "—"],
+          ["Total Conciliado",
+            String(summary.reconciled_count),
+            fmtBRL(summary.reconciled_amount),
+            "100%"],
+        ],
+        headStyles: { fillColor: [5, 150, 105], textColor: 255 },
+        columnStyles: { 2: { halign: "right" }, 3: { halign: "center" } },
+        footStyles: { fillColor: [240, 253, 244], textColor: [5, 150, 105], fontStyle: "bold" },
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 9 },
+      });
+      curY = (doc as any).lastAutoTable?.finalY ?? curY + 35;
+
+      // ── 3. Divergências ───────────────────────────────────────────────
+      curY += 8;
+      if (curY > ph - 60) { doc.addPage(); curY = 18; }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text("3. Divergências Identificadas", 14, curY);
+      curY += 6;
+
+      const divergent = filtered.filter((t) => t.status === "divergent");
+      if (divergent.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(10);
+        doc.text("Nenhuma divergência no período.", 14, curY + 4);
+        curY += 12;
+      } else {
         autoTable(doc, {
-          startY: lastY1 + 8,
-          head: [["Método", "Total", "Conciliadas", "Taxa %"]],
+          startY: curY,
+          head: [["Data", "Valor", "Método", "Descrição", "Cliente"]],
+          body: divergent.slice(0, 50).map((t) => [
+            fmtDate(t.transaction_date),
+            fmtBRL(t.amount),
+            METHOD_LABELS[t.method] ?? t.method,
+            (t.description ?? "—").slice(0, 35),
+            (t.customer_name ?? "—").slice(0, 22),
+          ]),
+          headStyles: { fillColor: [220, 38, 38], textColor: 255 },
+          alternateRowStyles: { fillColor: [254, 242, 242] },
+          margin: { left: 14, right: 14 },
+          styles: { fontSize: 8, cellPadding: 2 },
+        });
+        curY = (doc as any).lastAutoTable?.finalY ?? curY + 40;
+        if (divergent.length > 50) {
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "italic");
+          doc.text(`(mostrando 50 de ${divergent.length} divergências)`, 14, curY + 4);
+          curY += 8;
+        }
+      }
+
+      // ── 4. Evolução mensal ────────────────────────────────────────────
+      if (monthComp) {
+        curY += 8;
+        if (curY > ph - 70) { doc.addPage(); curY = 18; }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(17, 24, 39);
+        doc.text("4. Evolução Mensal (vs Mês Anterior)", 14, curY);
+        curY += 6;
+        const prevRate = monthComp.prev_month_total > 0
+          ? ((monthComp.prev_month_reconciled / monthComp.prev_month_total) * 100).toFixed(1)
+          : "—";
+        const currRate = monthComp.current_month_total > 0
+          ? ((monthComp.current_month_reconciled / monthComp.current_month_total) * 100).toFixed(1)
+          : "—";
+        autoTable(doc, {
+          startY: curY,
+          head: [["Indicador", "Mês Anterior", "Mês Atual", "Variação"]],
+          body: [
+            ["Total transações",
+              String(monthComp.prev_month_total),
+              String(monthComp.current_month_total),
+              monthComp.prev_month_total > 0
+                ? `${(((monthComp.current_month_total - monthComp.prev_month_total) / monthComp.prev_month_total) * 100).toFixed(1)}%`
+                : "—"],
+            ["Conciliadas",
+              String(monthComp.prev_month_reconciled),
+              String(monthComp.current_month_reconciled),
+              monthComp.prev_month_reconciled > 0
+                ? `${(((monthComp.current_month_reconciled - monthComp.prev_month_reconciled) / monthComp.prev_month_reconciled) * 100).toFixed(1)}%`
+                : "—"],
+            ["Divergências",
+              String(monthComp.prev_month_divergent),
+              String(monthComp.current_month_divergent),
+              "—"],
+            ["Taxa conciliação", `${prevRate}%`, `${currRate}%`, "—"],
+          ],
+          headStyles: { fillColor: [88, 28, 135], textColor: 255 },
+          columnStyles: { 2: { halign: "right" }, 3: { halign: "center" } },
+          margin: { left: 14, right: 14 },
+          styles: { fontSize: 9 },
+        });
+        curY = (doc as any).lastAutoTable?.finalY ?? curY + 40;
+      }
+
+      // ── 5. Breakdown por método ────────────────────────────────────────
+      if (methodBreakdown.length > 0) {
+        curY += 8;
+        if (curY > ph - 70) { doc.addPage(); curY = 18; }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(17, 24, 39);
+        doc.text("5. Breakdown por Método de Pagamento", 14, curY);
+        curY += 6;
+        autoTable(doc, {
+          startY: curY,
+          head: [["Método", "Total Txs", "Valor Total", "Conciliadas", "Taxa %"]],
           body: methodBreakdown.map((m) => [
             METHOD_LABELS[m.method] ?? m.method,
-            `${m.total_count} (${fmtBRL(m.total_amount)})`,
+            String(m.total_count),
+            fmtBRL(m.total_amount),
             `${m.reconciled_count} (${fmtBRL(m.reconciled_amount)})`,
             `${m.reconciliation_rate}%`,
           ]),
           headStyles: { fillColor: [55, 65, 81], textColor: 255 },
-          margin: { left: 14, right: 14 }, styles: { fontSize: 9 },
+          columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "center" } },
+          margin: { left: 14, right: 14 },
+          styles: { fontSize: 9 },
         });
+        curY = (doc as any).lastAutoTable?.finalY ?? curY + 40;
       }
 
-      const lastY = (doc as any).lastAutoTable?.finalY ?? 110;
+      // ── 6. Todas as transações ────────────────────────────────────────
+      doc.addPage();
+      doc.setFillColor(37, 99, 235);
+      doc.rect(0, 0, pw, 14, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text("6. Listagem Completa de Transações", pw / 2, 9, { align: "center" });
+      doc.setTextColor(17, 24, 39);
+
       autoTable(doc, {
-        startY: lastY + 8,
-        head: [["Data", "Valor", "Método", "Descrição", "Status", "Cliente"]],
+        startY: 18,
+        head: [["Data", "Valor", "Método", "Descrição", "Status", "Cliente", "Conf. Score"]],
         body: filtered.map((t) => [
-          fmtDate(t.transaction_date), fmtBRL(t.amount), METHOD_LABELS[t.method] ?? t.method,
-          (t.description ?? "—").slice(0, 30), STATUS_CONFIG[t.status]?.label ?? t.status,
-          (t.customer_name ?? "—").slice(0, 20),
+          fmtDate(t.transaction_date),
+          fmtBRL(t.amount),
+          METHOD_LABELS[t.method] ?? t.method,
+          (t.description ?? "—").slice(0, 28),
+          STATUS_CONFIG[t.status]?.label ?? t.status,
+          (t.customer_name ?? "—").slice(0, 18),
+          t.confidence_score != null ? `${t.confidence_score}%` : "—",
         ]),
         headStyles: { fillColor: [55, 65, 81], textColor: 255 },
         alternateRowStyles: { fillColor: [249, 250, 251] },
-        margin: { left: 14, right: 14 }, styles: { fontSize: 8, cellPadding: 2 },
+        margin: { left: 14, right: 14 },
+        styles: { fontSize: 7.5, cellPadding: 1.8 },
+        didParseCell: (data) => {
+          if (data.column.index === 4 && data.section === "body") {
+            const status = (data.cell.raw as string) ?? "";
+            if (status === "Conciliada") data.cell.styles.textColor = [5, 150, 105];
+            else if (status === "Divergente") data.cell.styles.textColor = [220, 38, 38];
+            else if (status === "Pendente") data.cell.styles.textColor = [202, 138, 4];
+          }
+        },
       });
 
-      doc.save(`relatorio-connect-${toISO(new Date())}.pdf`);
-      toast.success("PDF exportado!");
-    } catch (e) { toast.error("Erro ao exportar PDF"); }
+      // ── Rodapé em todas as páginas ────────────────────────────────────
+      const pages = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= pages; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.2);
+        doc.line(14, ph - 10, pw - 14, ph - 10);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 100, 100);
+        doc.text("Estokfy Connect — Relatório Executivo", 14, ph - 6);
+        doc.text(`Página ${i} de ${pages}`, pw - 14, ph - 6, { align: "right" });
+        doc.text(generatedAt, pw / 2, ph - 6, { align: "center" });
+      }
+
+      doc.save(`relatorio-executivo-connect-${toISO(new Date())}.pdf`);
+      toast.success("Relatório executivo PDF exportado!");
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro ao exportar PDF: " + String(e));
+    }
   };
 
   // ── Render ────────────────────────────────────────────────────────────

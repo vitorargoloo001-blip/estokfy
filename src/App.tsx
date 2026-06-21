@@ -67,6 +67,10 @@ const ConnectDiscrepancies = lazy(() => import("./pages/Connect/Discrepancies"))
 const ConnectAudit = lazy(() => import("./pages/Connect/ConnectAudit"));
 const ConnectSettings = lazy(() => import("./pages/Connect/Settings"));
 const ConnectLicenses = lazy(() => import("./pages/Connect/ConnectLicenses"));
+const ConnectHealth = lazy(() => import("./pages/Connect/ConnectionHealth"));
+const ConnectAIInsights = lazy(() => import("./pages/Connect/AIInsights"));
+const ConnectCashFlow = lazy(() => import("./pages/Connect/CashFlowForecast"));
+const ConnectMasterDashboard = lazy(() => import("./pages/Connect/MasterDashboard"));
 const SuperAdminModuleLicensing = lazy(() => import("./pages/super-admin/SuperAdminModuleLicensing"));
 const FinancialDashboard = lazy(() => import("./pages/super-admin/FinancialDashboard"));
 
@@ -153,6 +157,9 @@ function ProtectedRoutes() {
             <Route path="connect/configuracoes" element={<RequireConnectModule><ConnectSettings /></RequireConnectModule>} />
             <Route path="connect/relatorios" element={<RequireConnectModule><ConnectReports /></RequireConnectModule>} />
             <Route path="connect/alertas" element={<RequireConnectModule><ConnectAlerts /></RequireConnectModule>} />
+            <Route path="connect/saude" element={<RequireConnectModule><ConnectHealth /></RequireConnectModule>} />
+            <Route path="connect/insights" element={<RequireConnectModule><ConnectAIInsights /></RequireConnectModule>} />
+            <Route path="connect/fluxo" element={<RequireConnectModule><ConnectCashFlow /></RequireConnectModule>} />
             <Route path="ajuda" element={<Help />} />
           </Route>
           <Route path="apresentacao" element={<Presentation />} />
@@ -221,6 +228,7 @@ const App = () => (
                   <Route path="stores/:id" element={<SuperAdminStoreDetail />} />
                   <Route path="modules" element={<SuperAdminModuleLicensing />} />
                   <Route path="connect/licenses" element={<ConnectLicenses />} />
+                  <Route path="connect/master" element={<ConnectMasterDashboard />} />
                   <Route path="financeiro" element={<FinancialDashboard />} />
                   <Route path="payment-verifications" element={<SuperAdminPaymentVerifications />} />
                 </Route>

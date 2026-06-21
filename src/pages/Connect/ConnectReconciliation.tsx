@@ -98,6 +98,8 @@ function PendentesTab() {
     toggleSelected, toggleSelectAll, clearSelection, loadPendingMatches,
   } = useReconciliation();
 
+  const [confidenceFilter, setConfidenceFilter] = useState<"all" | "high" | "medium" | "low">("all");
+
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{
     reconciliationId: string; amount: number; date: string;
@@ -198,11 +200,39 @@ function PendentesTab() {
     );
   }
 
-  const allSelected = selectedIds.size === pendingMatches.length && pendingMatches.length > 0;
+  const filtered = pendingMatches.filter((m) => {
+    if (confidenceFilter === "all")    return true;
+    if (confidenceFilter === "high")   return m.confidence_score >= 85;
+    if (confidenceFilter === "medium") return m.confidence_score >= 60 && m.confidence_score < 85;
+    return m.confidence_score < 60;
+  });
+
+  const highCount   = pendingMatches.filter((m) => m.confidence_score >= 85).length;
+  const mediumCount = pendingMatches.filter((m) => m.confidence_score >= 60 && m.confidence_score < 85).length;
+  const lowCount    = pendingMatches.filter((m) => m.confidence_score < 60).length;
+
+  const allSelected = selectedIds.size === filtered.length && filtered.length > 0;
   const someSelected = selectedIds.size > 0;
 
   return (
     <>
+      {/* Filtro por confiança */}
+      <div className="flex gap-1 flex-wrap">
+        {([
+          { key: "all",    label: `Todos (${pendingMatches.length})`,    cls: "" },
+          { key: "high",   label: `Alta ≥85% (${highCount})`,            cls: "text-green-700 border-green-300" },
+          { key: "medium", label: `Média 60–84% (${mediumCount})`,       cls: "text-yellow-700 border-yellow-300" },
+          { key: "low",    label: `Baixa <60% (${lowCount})`,            cls: "text-orange-700 border-orange-300" },
+        ] as const).map(({ key, label, cls }) => (
+          <Button key={key} size="sm"
+            variant={confidenceFilter === key ? "default" : "outline"}
+            className={`h-7 text-xs ${confidenceFilter !== key ? cls : ""}`}
+            onClick={() => { setConfidenceFilter(key); clearSelection(); }}>
+            {label}
+          </Button>
+        ))}
+      </div>
+
       {someSelected && (
         <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
           <span className="text-sm font-medium">{selectedIds.size} selecionado(s)</span>
@@ -238,7 +268,9 @@ function PendentesTab() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center justify-between">
-            <span>{pendingMatches.length} transação(ões) aguardando revisão</span>
+            <span>{filtered.length} transação(ões) aguardando revisão
+              {confidenceFilter !== "all" && ` (filtro: ${confidenceFilter})`}
+            </span>
             <Button variant="ghost" size="sm" onClick={loadPendingMatches}>
               <RefreshCw className="h-4 w-4" />
             </Button>
@@ -259,7 +291,7 @@ function PendentesTab() {
                 </tr>
               </thead>
               <tbody>
-                {pendingMatches.map((m) => {
+                {filtered.map((m) => {
                   const expanded = expandedIds.has(m.id);
                   return (
                     <React.Fragment key={m.id}>
