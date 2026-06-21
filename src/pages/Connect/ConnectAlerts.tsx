@@ -1,12 +1,27 @@
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertTriangle, AlertCircle, Info, Bell, BellOff, CheckCheck, RefreshCw,
+  Settings, Mail, Save,
 } from "lucide-react";
 import { useConnectAlerts, type ConnectAlert } from "@/hooks/useConnectAlerts";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+
+interface EmailSettings {
+  is_enabled: boolean;
+  email_to: string;
+  on_divergent: boolean;
+  on_low_rate: boolean;
+  on_duplicate: boolean;
+  on_pending: boolean;
+  low_rate_threshold: number;
+}
 
 const SEVERITY_CONFIG = {
   error: {
@@ -106,10 +121,65 @@ function AlertCard({ alert, onDismiss, onRead }: {
 }
 
 export default function ConnectAlerts() {
+  const { profile } = useAuth();
   const {
     alerts, unreadCount, loading, error,
     load, dismissAlert, markRead, dismissAll, markAllRead,
   } = useConnectAlerts();
+
+  // Email settings
+  const [settings, setSettings] = useState<EmailSettings>({
+    is_enabled: false, email_to: "", on_divergent: true,
+    on_low_rate: true, on_duplicate: true, on_pending: false, low_rate_threshold: 70,
+  });
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+
+  const loadSettings = useCallback(async () => {
+    if (!profile?.store_id) return;
+    const { data } = await supabase.rpc("get_email_alert_settings", { p_store_id: profile.store_id });
+    const rows = data as EmailSettings[] | null;
+    if (rows && rows.length > 0) {
+      setSettings({
+        is_enabled: rows[0].is_enabled ?? false,
+        email_to: rows[0].email_to ?? "",
+        on_divergent: rows[0].on_divergent ?? true,
+        on_low_rate: rows[0].on_low_rate ?? true,
+        on_duplicate: rows[0].on_duplicate ?? true,
+        on_pending: rows[0].on_pending ?? false,
+        low_rate_threshold: rows[0].low_rate_threshold ?? 70,
+      });
+    }
+    setSettingsLoaded(true);
+  }, [profile?.store_id]);
+
+  const saveSettings = async () => {
+    if (!profile?.store_id) return;
+    setSaving(true);
+    try {
+      const { data, error: err } = await supabase.rpc("upsert_email_alert_settings", {
+        p_store_id:           profile.store_id,
+        p_is_enabled:         settings.is_enabled,
+        p_email_to:           settings.email_to || null,
+        p_on_divergent:       settings.on_divergent,
+        p_on_low_rate:        settings.on_low_rate,
+        p_on_duplicate:       settings.on_duplicate,
+        p_on_pending:         settings.on_pending,
+        p_low_rate_threshold: settings.low_rate_threshold,
+      });
+      const rows = data as Array<{ success: boolean; message: string }> | null;
+      if (err || !rows?.[0]?.success) throw new Error(rows?.[0]?.message || "Erro");
+      toast.success("Configurações de email salvas com sucesso!");
+      setShowSettings(false);
+    } catch (e) {
+      toast.error("Erro ao salvar: " + String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  useEffect(() => { loadSettings(); }, [loadSettings]);
 
   useEffect(() => {
     markAllRead();
@@ -149,6 +219,14 @@ export default function ConnectAlerts() {
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => load()}>
             <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={showSettings ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowSettings((v) => !v)}
+          >
+            <Settings className="h-4 w-4 mr-1" />
+            Email
           </Button>
           {activeCount > 0 && (
             <Button variant="outline" size="sm" onClick={handleDismissAll}>
@@ -279,6 +357,92 @@ export default function ConnectAlerts() {
                 onRead={markRead}
               />
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Painel de configuração de alertas por email */}
+      {showSettings && (
+        <Card className="border-blue-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Mail className="h-4 w-4 text-blue-600" />
+              Alertas por E-mail
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Toggle principal */}
+            <div className="flex items-center justify-between py-2 border-b">
+              <div>
+                <p className="text-sm font-medium">Ativar alertas por email</p>
+                <p className="text-xs text-muted-foreground">Receba notificações importantes no email</p>
+              </div>
+              <Switch
+                checked={settings.is_enabled}
+                onCheckedChange={(v) => setSettings((s) => ({ ...s, is_enabled: v }))}
+              />
+            </div>
+
+            {/* Email destinatário */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">E-mail para receber alertas</label>
+              <Input
+                type="email"
+                placeholder="seu@email.com"
+                value={settings.email_to}
+                onChange={(e) => setSettings((s) => ({ ...s, email_to: e.target.value }))}
+                disabled={!settings.is_enabled}
+              />
+            </div>
+
+            {/* Tipos de alerta */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Tipos de alerta</p>
+              {[
+                { key: "on_divergent", label: "Transação divergente", desc: "Quando uma transação não encontrar venda" },
+                { key: "on_low_rate",  label: "Taxa de conciliação baixa", desc: `Abaixo de ${settings.low_rate_threshold}%` },
+                { key: "on_duplicate", label: "Pagamento duplicado", desc: "Quando detectar possível duplicata" },
+                { key: "on_pending",   label: "Pendentes por muito tempo", desc: "Transações sem conciliar há mais de 7 dias" },
+              ].map(({ key, label, desc }) => (
+                <div key={key} className="flex items-center justify-between py-1.5">
+                  <div>
+                    <p className="text-sm">{label}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </div>
+                  <Switch
+                    checked={settings[key as keyof EmailSettings] as boolean}
+                    onCheckedChange={(v) => setSettings((s) => ({ ...s, [key]: v }))}
+                    disabled={!settings.is_enabled}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Threshold */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Limiar de taxa baixa: <span className="text-primary font-bold">{settings.low_rate_threshold}%</span>
+              </label>
+              <input
+                type="range" min={50} max={95} step={5}
+                value={settings.low_rate_threshold}
+                onChange={(e) => setSettings((s) => ({ ...s, low_rate_threshold: Number(e.target.value) }))}
+                disabled={!settings.is_enabled || !settings.on_low_rate}
+                className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-primary disabled:opacity-40"
+              />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>50%</span><span>70%</span><span>95%</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowSettings(false)}>Cancelar</Button>
+              <Button onClick={saveSettings} disabled={saving}>
+                {saving
+                  ? <><RefreshCw className="h-4 w-4 mr-1 animate-spin" />Salvando...</>
+                  : <><Save className="h-4 w-4 mr-1" />Salvar configurações</>}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

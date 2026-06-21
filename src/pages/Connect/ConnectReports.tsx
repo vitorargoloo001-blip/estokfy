@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -6,8 +6,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from "recharts";
+import {
   FileText, Download, RefreshCw, TrendingUp, CheckCircle2,
-  AlertCircle, Clock, XCircle,
+  AlertCircle, Clock, XCircle, ArrowUpRight, ArrowDownRight, Minus,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -45,6 +48,26 @@ interface ReportTransaction {
   confirmed_by_email: string | null;
 }
 
+interface MethodBreakdown {
+  method: string;
+  total_count: number;
+  total_amount: number;
+  reconciled_count: number;
+  reconciled_amount: number;
+  divergent_count: number;
+  pending_count: number;
+  reconciliation_rate: number;
+}
+
+interface MonthComparison {
+  current_month_reconciled: number;
+  current_month_total: number;
+  current_month_divergent: number;
+  prev_month_reconciled: number;
+  prev_month_total: number;
+  prev_month_divergent: number;
+}
+
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v ?? 0);
 
@@ -54,10 +77,7 @@ const fmtDate = (d: string | null) =>
 const fmtDateTime = (d: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
 
-const STATUS_CONFIG: Record<
-  string,
-  { label: string; className: string }
-> = {
+const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   reconciled: { label: "Conciliada",  className: "bg-green-100 text-green-800" },
   divergent:  { label: "Divergente",  className: "bg-red-100 text-red-800" },
   pending:    { label: "Pendente",    className: "bg-yellow-100 text-yellow-800" },
@@ -66,14 +86,18 @@ const STATUS_CONFIG: Record<
 
 const METHOD_LABELS: Record<string, string> = {
   pix: "PIX", ted: "TED", doc: "DOC", boleto: "Boleto",
-  credit_card: "Cartão Crédito", debit_card: "Cartão Débito", other: "Outro",
+  credit_card: "Cartão Créd.", debit_card: "Cartão Déb.", money: "Dinheiro", other: "Outro",
+};
+
+const METHOD_COLORS: Record<string, string> = {
+  pix: "#10b981", ted: "#3b82f6", doc: "#8b5cf6", boleto: "#f59e0b",
+  credit_card: "#ec4899", debit_card: "#06b6d4", money: "#84cc16", other: "#9ca3af",
 };
 
 function getPeriod(preset: string): { start: Date; end: Date } {
   const now = new Date();
   const y = now.getFullYear();
   const m = now.getMonth();
-
   switch (preset) {
     case "current_month":
       return { start: new Date(y, m, 1), end: new Date(y, m + 1, 0) };
@@ -87,7 +111,6 @@ function getPeriod(preset: string): { start: Date; end: Date } {
       const qEnd = new Date(y, Math.floor(m / 3) * 3 + 3, 0);
       return { start: qStart, end: qEnd };
     }
-    case "last_30":
     default: {
       const end = new Date();
       const start = new Date();
@@ -97,32 +120,55 @@ function getPeriod(preset: string): { start: Date; end: Date } {
   }
 }
 
-function toISO(d: Date) {
-  return d.toISOString().split("T")[0];
+function toISO(d: Date) { return d.toISOString().split("T")[0]; }
+
+function DeltaBadge({ current, prev }: { current: number; prev: number }) {
+  if (prev === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  const pct = ((current - prev) / prev) * 100;
+  const up = pct >= 0;
+  return (
+    <span className={`text-xs font-medium flex items-center gap-0.5 ${up ? "text-green-600" : "text-red-600"}`}>
+      {up ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+      {Math.abs(pct).toFixed(1)}%
+    </span>
+  );
 }
 
 export default function ConnectReports() {
   const { profile } = useAuth();
-  const [preset, setPreset] = useState("current_month");
-  const [loading, setLoading] = useState(false);
-  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [preset, setPreset]           = useState("current_month");
+  const [loading, setLoading]         = useState(false);
+  const [summary, setSummary]         = useState<ReportSummary | null>(null);
   const [transactions, setTransactions] = useState<ReportTransaction[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [methodBreakdown, setMethodBreakdown] = useState<MethodBreakdown[]>([]);
+  const [monthComp, setMonthComp]     = useState<MonthComparison | null>(null);
 
   const load = useCallback(async () => {
     if (!profile?.store_id) return;
     const { start, end } = getPeriod(preset);
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc("get_reconciliation_report", {
-        p_store_id: profile.store_id,
-        p_start_date: toISO(start),
-        p_end_date: toISO(end),
-      });
-      if (error) throw error;
-      const d = data as { summary: ReportSummary; transactions: ReportTransaction[] };
+      const [reportRes, methodRes, compRes] = await Promise.all([
+        supabase.rpc("get_reconciliation_report", {
+          p_store_id: profile.store_id,
+          p_start_date: toISO(start),
+          p_end_date: toISO(end),
+        }),
+        supabase.rpc("get_reconciliation_by_method", {
+          p_store_id: profile.store_id,
+          p_start_date: toISO(start),
+          p_end_date: toISO(end),
+        }),
+        supabase.rpc("get_monthly_comparison", { p_store_id: profile.store_id }),
+      ]);
+
+      if (reportRes.error) throw reportRes.error;
+      const d = reportRes.data as { summary: ReportSummary; transactions: ReportTransaction[] };
       setSummary(d.summary);
       setTransactions(d.transactions || []);
+      setMethodBreakdown((methodRes.data as MethodBreakdown[]) || []);
+      setMonthComp(compRes.data as MonthComparison | null);
     } catch (e) {
       toast.error("Erro ao carregar relatório: " + String(e));
     } finally {
@@ -130,14 +176,16 @@ export default function ConnectReports() {
     }
   }, [profile?.store_id, preset]);
 
+  // Auto-load ao montar e ao trocar período
+  useEffect(() => { load(); }, [load]);
+
   const filtered = transactions.filter(
     (t) => statusFilter === "all" || t.status === statusFilter
   );
 
   // ── CSV Export ────────────────────────────────────────────────────────
-
   const exportCSV = () => {
-    const headers = ["Data", "Valor", "Tipo", "Método", "Descrição", "Banco", "Status", "Cliente", "Tipo Match", "Confirmado em", "Confirmado por"];
+    const headers = ["Data","Valor","Tipo","Método","Descrição","Banco","Status","Cliente","Tipo Match","Confirmado em","Confirmado por"];
     const rows = filtered.map((t) => [
       fmtDate(t.transaction_date),
       t.amount.toFixed(2).replace(".", ","),
@@ -154,22 +202,18 @@ export default function ConnectReports() {
     const BOM = "﻿";
     const csv = BOM + [
       headers.join(";"),
-      ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")),
+      ...rows.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(";")),
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `relatorio-connect-${toISO(new Date())}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    a.href = url; a.download = `relatorio-connect-${toISO(new Date())}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
     toast.success("CSV exportado!");
   };
 
   // ── Excel Export ──────────────────────────────────────────────────────
-
   const exportExcel = async () => {
     if (!summary) return;
     try {
@@ -191,47 +235,39 @@ export default function ConnectReports() {
       ];
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumoData), "Resumo");
 
-      // Sheet 2: Todas as transações
-      const txHeader = ["Data", "Valor", "Método", "Descrição", "Banco", "Status", "Cliente", "Tipo Match", "Conf %", "Confirmado em"];
+      // Sheet 2: Breakdown por método
+      if (methodBreakdown.length > 0) {
+        const methodHeader = ["Método","Total Qtd","Total Valor","Conciliadas","Valor Conciliado","Divergentes","Pendentes","Taxa %"];
+        const methodRows = methodBreakdown.map((m) => [
+          METHOD_LABELS[m.method] ?? m.method,
+          m.total_count, m.total_amount, m.reconciled_count,
+          m.reconciled_amount, m.divergent_count, m.pending_count, m.reconciliation_rate,
+        ]);
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([methodHeader, ...methodRows]), "Por Método");
+      }
+
+      // Sheet 3: Todas as transações
+      const txHeader = ["Data","Valor","Método","Descrição","Banco","Status","Cliente","Tipo Match","Conf %","Confirmado em"];
       const txRows = transactions.map((t) => [
-        fmtDate(t.transaction_date),
-        t.amount,
-        METHOD_LABELS[t.method] ?? t.method,
-        t.description,
-        t.bank_name,
-        STATUS_CONFIG[t.status]?.label ?? t.status,
-        t.customer_name,
-        t.match_type,
-        t.confidence_score ?? "",
-        fmtDateTime(t.confirmed_at),
+        fmtDate(t.transaction_date), t.amount, METHOD_LABELS[t.method] ?? t.method,
+        t.description, t.bank_name, STATUS_CONFIG[t.status]?.label ?? t.status,
+        t.customer_name, t.match_type, t.confidence_score ?? "", fmtDateTime(t.confirmed_at),
       ]);
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([txHeader, ...txRows]), "Transações");
 
-      // Sheet 3: Divergentes
-      const divRows = transactions
-        .filter((t) => t.status === "divergent")
-        .map((t) => [
-          fmtDate(t.transaction_date),
-          t.amount,
-          METHOD_LABELS[t.method] ?? t.method,
-          t.description,
-          t.bank_name,
-        ]);
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.aoa_to_sheet([["Data", "Valor", "Método", "Descrição", "Banco"], ...divRows]),
-        "Divergentes"
-      );
+      // Sheet 4: Divergentes
+      const divRows = transactions.filter((t) => t.status === "divergent").map((t) => [
+        fmtDate(t.transaction_date), t.amount, METHOD_LABELS[t.method] ?? t.method, t.description, t.bank_name,
+      ]);
+      XLSX.utils.book_append_sheet(wb,
+        XLSX.utils.aoa_to_sheet([["Data","Valor","Método","Descrição","Banco"], ...divRows]), "Divergentes");
 
       XLSX.writeFile(wb, `relatorio-connect-${toISO(new Date())}.xlsx`);
       toast.success("Excel exportado!");
-    } catch (e) {
-      toast.error("Erro ao exportar Excel");
-    }
+    } catch (e) { toast.error("Erro ao exportar Excel"); }
   };
 
   // ── PDF Export ────────────────────────────────────────────────────────
-
   const exportPDF = async () => {
     if (!summary) return;
     try {
@@ -240,19 +276,13 @@ export default function ConnectReports() {
       const doc = new jsPDF();
       const pw = doc.internal.pageSize.getWidth();
 
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16); doc.setFont("helvetica", "bold");
       doc.text("Relatório de Conciliação", pw / 2, 18, { align: "center" });
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10); doc.setFont("helvetica", "normal");
       doc.text("Estokfy Connect", pw / 2, 25, { align: "center" });
-      doc.text(
-        `Período: ${fmtDate(summary.period_start)} a ${fmtDate(summary.period_end)}`,
-        pw / 2, 31, { align: "center" }
-      );
+      doc.text(`Período: ${fmtDate(summary.period_start)} a ${fmtDate(summary.period_end)}`, pw / 2, 31, { align: "center" });
       doc.text(`Gerado em: ${fmtDateTime(new Date().toISOString())}`, pw / 2, 37, { align: "center" });
 
-      // KPIs
       autoTable(doc, {
         startY: 44,
         head: [["Indicador", "Quantidade", "Valor"]],
@@ -266,44 +296,50 @@ export default function ConnectReports() {
         ],
         headStyles: { fillColor: [37, 99, 235], textColor: 255 },
         columnStyles: { 2: { halign: "right" } },
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 10 },
+        margin: { left: 14, right: 14 }, styles: { fontSize: 10 },
       });
 
-      const lastY = (doc as any).lastAutoTable?.finalY ?? 110;
+      if (methodBreakdown.length > 0) {
+        const lastY1 = (doc as any).lastAutoTable?.finalY ?? 120;
+        autoTable(doc, {
+          startY: lastY1 + 8,
+          head: [["Método", "Total", "Conciliadas", "Taxa %"]],
+          body: methodBreakdown.map((m) => [
+            METHOD_LABELS[m.method] ?? m.method,
+            `${m.total_count} (${fmtBRL(m.total_amount)})`,
+            `${m.reconciled_count} (${fmtBRL(m.reconciled_amount)})`,
+            `${m.reconciliation_rate}%`,
+          ]),
+          headStyles: { fillColor: [55, 65, 81], textColor: 255 },
+          margin: { left: 14, right: 14 }, styles: { fontSize: 9 },
+        });
+      }
 
-      // Tabela de transações
+      const lastY = (doc as any).lastAutoTable?.finalY ?? 110;
       autoTable(doc, {
         startY: lastY + 8,
         head: [["Data", "Valor", "Método", "Descrição", "Status", "Cliente"]],
         body: filtered.map((t) => [
-          fmtDate(t.transaction_date),
-          fmtBRL(t.amount),
-          METHOD_LABELS[t.method] ?? t.method,
-          (t.description ?? "—").slice(0, 30),
-          STATUS_CONFIG[t.status]?.label ?? t.status,
+          fmtDate(t.transaction_date), fmtBRL(t.amount), METHOD_LABELS[t.method] ?? t.method,
+          (t.description ?? "—").slice(0, 30), STATUS_CONFIG[t.status]?.label ?? t.status,
           (t.customer_name ?? "—").slice(0, 20),
         ]),
         headStyles: { fillColor: [55, 65, 81], textColor: 255 },
         alternateRowStyles: { fillColor: [249, 250, 251] },
-        margin: { left: 14, right: 14 },
-        styles: { fontSize: 8, cellPadding: 2 },
+        margin: { left: 14, right: 14 }, styles: { fontSize: 8, cellPadding: 2 },
       });
 
       doc.save(`relatorio-connect-${toISO(new Date())}.pdf`);
       toast.success("PDF exportado!");
-    } catch (e) {
-      toast.error("Erro ao exportar PDF");
-    }
+    } catch (e) { toast.error("Erro ao exportar PDF"); }
   };
 
+  // ── Render ────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Relatórios de Conciliação</h2>
-        <p className="text-muted-foreground mt-1">
-          Gere relatórios por período e exporte em PDF, Excel ou CSV
-        </p>
+        <p className="text-muted-foreground mt-1">Análise completa por período com exportação PDF, Excel e CSV</p>
       </div>
 
       {/* Controles */}
@@ -327,21 +363,18 @@ export default function ConnectReports() {
             <Button onClick={load} disabled={loading}>
               {loading
                 ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Carregando...</>
-                : <><FileText className="h-4 w-4 mr-2" />Gerar relatório</>}
+                : <><RefreshCw className="h-4 w-4 mr-2" />Atualizar</>}
             </Button>
             {summary && (
               <div className="flex gap-2 ml-auto">
                 <Button variant="outline" size="sm" onClick={exportCSV}>
-                  <Download className="h-4 w-4 mr-1" />
-                  CSV
+                  <Download className="h-4 w-4 mr-1" />CSV
                 </Button>
                 <Button variant="outline" size="sm" onClick={exportExcel}>
-                  <Download className="h-4 w-4 mr-1" />
-                  Excel
+                  <Download className="h-4 w-4 mr-1" />Excel
                 </Button>
                 <Button variant="outline" size="sm" onClick={exportPDF}>
-                  <Download className="h-4 w-4 mr-1" />
-                  PDF
+                  <Download className="h-4 w-4 mr-1" />PDF
                 </Button>
               </div>
             )}
@@ -349,32 +382,22 @@ export default function ConnectReports() {
         </CardContent>
       </Card>
 
-      {!summary && !loading && (
-        <Card className="border-dashed">
-          <CardContent className="pt-12 pb-12 text-center">
-            <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-30" />
-            <p className="text-sm text-muted-foreground">
-              Selecione o período e clique em "Gerar relatório"
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
       {loading && (
-        <div className="flex justify-center py-12">
-          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {[...Array(5)].map((_, i) => (
+            <Card key={i}><CardContent className="pt-4"><div className="h-16 bg-muted/40 rounded animate-pulse" /></CardContent></Card>
+          ))}
         </div>
       )}
 
-      {summary && !loading && (
+      {!loading && summary && (
         <>
           {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-blue-600" />
-                  Total recebido
+                  <TrendingUp className="h-4 w-4 text-blue-600" />Total recebido
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -386,8 +409,7 @@ export default function ConnectReports() {
             <Card className="border-green-200">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-green-600" />
-                  Conciliadas
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />Conciliadas
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -399,8 +421,7 @@ export default function ConnectReports() {
             <Card className={summary.divergent_count > 0 ? "border-red-200" : ""}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-red-600" />
-                  Divergentes
+                  <AlertCircle className="h-4 w-4 text-red-600" />Divergentes
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -414,8 +435,7 @@ export default function ConnectReports() {
             <Card className={summary.pending_count > 0 ? "border-yellow-200" : ""}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-yellow-600" />
-                  Pendentes
+                  <Clock className="h-4 w-4 text-yellow-600" />Pendentes
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -428,22 +448,135 @@ export default function ConnectReports() {
 
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Taxa</CardTitle>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <XCircle className="h-4 w-4 text-gray-400" />Taxa
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className={`text-xl font-bold ${
                   summary.reconciliation_rate >= 80 ? "text-green-600"
                   : summary.reconciliation_rate >= 50 ? "text-yellow-600"
                   : "text-red-600"
-                }`}>
-                  {summary.reconciliation_rate}%
-                </p>
+                }`}>{summary.reconciliation_rate}%</p>
                 <p className="text-xs text-muted-foreground">conciliação</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Tabela */}
+          {/* Comparativo mensal */}
+          {monthComp && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                {
+                  label: "Conciliado (mês atual)",
+                  current: monthComp.current_month_reconciled,
+                  prev: monthComp.prev_month_reconciled,
+                  format: fmtBRL, color: "text-green-600",
+                },
+                {
+                  label: "Recebido (mês atual)",
+                  current: monthComp.current_month_total,
+                  prev: monthComp.prev_month_total,
+                  format: fmtBRL, color: "text-blue-600",
+                },
+                {
+                  label: "Divergências (mês atual)",
+                  current: monthComp.current_month_divergent,
+                  prev: monthComp.prev_month_divergent,
+                  format: (v: number) => String(v), color: "text-red-600",
+                },
+              ].map(({ label, current, prev, format, color }) => (
+                <Card key={label}>
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                    <p className={`text-2xl font-bold ${color}`}>{format(current)}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-muted-foreground">vs mês anterior: {format(prev)}</span>
+                      <DeltaBadge current={current} prev={prev} />
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Breakdown por método */}
+          {methodBreakdown.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Breakdown por Método de Pagamento</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Gráfico */}
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={methodBreakdown} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="method" tickFormatter={(v) => METHOD_LABELS[v] ?? v} tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip
+                        formatter={(value: number, name: string) => [fmtBRL(value), name === "reconciled_amount" ? "Conciliado" : "Total"]}
+                        labelFormatter={(label) => METHOD_LABELS[label] ?? label}
+                      />
+                      <Bar dataKey="total_amount" name="Total" radius={[3, 3, 0, 0]}>
+                        {methodBreakdown.map((m) => (
+                          <Cell key={m.method} fill={METHOD_COLORS[m.method] ?? "#9ca3af"} fillOpacity={0.35} />
+                        ))}
+                      </Bar>
+                      <Bar dataKey="reconciled_amount" name="Conciliado" radius={[3, 3, 0, 0]}>
+                        {methodBreakdown.map((m) => (
+                          <Cell key={m.method} fill={METHOD_COLORS[m.method] ?? "#9ca3af"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+
+                  {/* Tabela resumo por método */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-2 text-xs font-medium text-muted-foreground">Método</th>
+                          <th className="text-right py-2 text-xs font-medium text-muted-foreground">Total</th>
+                          <th className="text-right py-2 text-xs font-medium text-muted-foreground">Conciliado</th>
+                          <th className="text-right py-2 text-xs font-medium text-muted-foreground">Taxa</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {methodBreakdown.map((m) => (
+                          <tr key={m.method} className="border-b hover:bg-muted/20">
+                            <td className="py-2 flex items-center gap-2">
+                              <span
+                                className="inline-block w-2.5 h-2.5 rounded-full"
+                                style={{ background: METHOD_COLORS[m.method] ?? "#9ca3af" }}
+                              />
+                              {METHOD_LABELS[m.method] ?? m.method}
+                            </td>
+                            <td className="py-2 text-right text-xs">{fmtBRL(m.total_amount)}</td>
+                            <td className="py-2 text-right text-xs text-green-700">{fmtBRL(m.reconciled_amount)}</td>
+                            <td className="py-2 text-right">
+                              <Badge
+                                variant="secondary"
+                                className={`text-xs ${
+                                  m.reconciliation_rate >= 80 ? "bg-green-100 text-green-800"
+                                  : m.reconciliation_rate >= 50 ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {m.reconciliation_rate}%
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Tabela de transações */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center justify-between">
@@ -464,9 +597,10 @@ export default function ConnectReports() {
             </CardHeader>
             <CardContent>
               {filtered.length === 0 ? (
-                <p className="text-center text-sm text-muted-foreground py-8">
-                  Nenhuma transação encontrada para o filtro selecionado.
-                </p>
+                <div className="text-center py-10">
+                  <FileText className="h-10 w-10 text-muted-foreground mx-auto mb-2 opacity-30" />
+                  <p className="text-sm text-muted-foreground">Nenhuma transação para o filtro selecionado.</p>
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -486,33 +620,22 @@ export default function ConnectReports() {
                         <tr key={t.id} className="border-b hover:bg-muted/20 transition-colors">
                           <td className="py-2.5 px-3 text-xs">{fmtDate(t.transaction_date)}</td>
                           <td className="py-2.5 px-3 font-medium">{fmtBRL(t.amount)}</td>
-                          <td className="py-2.5 px-3 text-xs">
-                            {METHOD_LABELS[t.method] ?? t.method}
-                          </td>
-                          <td className="py-2.5 px-3 text-xs max-w-[200px] truncate">
-                            {t.description || "—"}
-                          </td>
+                          <td className="py-2.5 px-3 text-xs">{METHOD_LABELS[t.method] ?? t.method}</td>
+                          <td className="py-2.5 px-3 text-xs max-w-[200px] truncate">{t.description || "—"}</td>
                           <td className="py-2.5 px-3">
-                            <Badge
-                              variant="secondary"
-                              className={`text-xs ${STATUS_CONFIG[t.status]?.className ?? ""}`}
-                            >
+                            <Badge variant="secondary" className={`text-xs ${STATUS_CONFIG[t.status]?.className ?? ""}`}>
                               {STATUS_CONFIG[t.status]?.label ?? t.status}
                             </Badge>
                           </td>
                           <td className="py-2.5 px-3 text-xs">{t.customer_name || "—"}</td>
-                          <td className="py-2.5 px-3 text-xs text-muted-foreground">
-                            {fmtDateTime(t.confirmed_at)}
-                          </td>
+                          <td className="py-2.5 px-3 text-xs text-muted-foreground">{fmtDateTime(t.confirmed_at)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               )}
-              <p className="text-xs text-muted-foreground mt-3">
-                {filtered.length} transação(ões) exibida(s)
-              </p>
+              <p className="text-xs text-muted-foreground mt-3">{filtered.length} transação(ões) exibida(s)</p>
             </CardContent>
           </Card>
         </>

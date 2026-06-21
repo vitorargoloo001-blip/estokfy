@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   RefreshCw, Filter, CheckCircle2, Link2, XCircle,
-  Search, Tag, ChevronDown, ChevronRight,
+  Search, Tag, ChevronDown, ChevronRight, History, Download,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -104,6 +104,30 @@ export default function Discrepancies() {
   const [ignoreTarget, setIgnoreTarget] = useState<Divergence | null>(null);
   const [ignoreReason, setIgnoreReason] = useState("");
   const [ignoring, setIgnoring]         = useState(false);
+
+  // Aba ativa
+  const [activeTab, setActiveTab] = useState<"ativas" | "historico">("ativas");
+
+  // Histórico de divergências
+  interface HistoryItem {
+    id: string;
+    transaction_date: string;
+    amount: number;
+    description: string | null;
+    method: string;
+    bank_name: string | null;
+    divergence_type: string | null;
+    divergence_reason: string | null;
+    status: string;
+    resolved_at: string | null;
+    resolved_by: string | null;
+    linked_sale_id: string | null;
+  }
+  const [historyItems, setHistoryItems]     = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyStatus, setHistoryStatus]   = useState("all");
+  const [historyDateStart, setHistoryDateStart] = useState("");
+  const [historyDateEnd, setHistoryDateEnd]     = useState("");
 
   // ── Carregar divergências ─────────────────────────────────────────
   const load = useCallback(async () => {
@@ -257,15 +281,208 @@ export default function Discrepancies() {
     }
   };
 
+  // ── Histórico ─────────────────────────────────────────────────────
+  const loadHistory = useCallback(async () => {
+    if (!storeId) return;
+    setHistoryLoading(true);
+    try {
+      const params: Record<string, unknown> = { p_store_id: storeId, p_limit: 200, p_offset: 0 };
+      if (historyStatus !== "all") params.p_status = historyStatus;
+      if (historyDateStart) params.p_start_date = historyDateStart;
+      if (historyDateEnd)   params.p_end_date   = historyDateEnd;
+      const { data, error: err } = await supabase.rpc("get_divergence_history", params);
+      if (err) throw err;
+      setHistoryItems((data as HistoryItem[]) || []);
+    } catch (e) {
+      toast.error("Erro ao carregar histórico: " + String(e));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [storeId, historyStatus, historyDateStart, historyDateEnd]);
+
+  useEffect(() => {
+    if (activeTab === "historico") loadHistory();
+  }, [activeTab, loadHistory]);
+
+  const exportHistoryCSV = () => {
+    const headers = ["Data","Valor","Método","Descrição","Banco","Tipo Divergência","Razão","Status","Resolvido em","Resolvido por"];
+    const rows = historyItems.map((h) => [
+      fmtDate(h.transaction_date),
+      (h.amount ?? 0).toFixed(2).replace(".", ","),
+      METHOD_LABELS[h.method] ?? h.method,
+      h.description ?? "",
+      h.bank_name ?? "",
+      DIVERGENCE_TYPES[h.divergence_type ?? ""]?.label ?? h.divergence_type ?? "",
+      h.divergence_reason ?? "",
+      h.status === "reconciled" ? "Resolvida" : "Ignorada",
+      fmtDate(h.resolved_at),
+      h.resolved_by ?? "",
+    ]);
+    const BOM = "﻿";
+    const csv = BOM + [
+      headers.join(";"),
+      ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";")),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `historico-divergencias-${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("CSV do histórico exportado!");
+  };
+
   // ── Render ────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Central de Divergências</h1>
-        <p className="text-muted-foreground mt-1">
-          Classifique, resolva ou ignore inconsistências entre transações bancárias e vendas
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Central de Divergências</h1>
+          <p className="text-muted-foreground mt-1">
+            Classifique, resolva ou ignore inconsistências entre transações bancárias e vendas
+          </p>
+        </div>
+        {/* Seletor de aba */}
+        <div className="flex gap-1 bg-muted rounded-lg p-1">
+          <button
+            onClick={() => setActiveTab("ativas")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+              activeTab === "ativas" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Filter className="h-3.5 w-3.5" />
+            Ativas ({items.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("historico")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+              activeTab === "historico" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <History className="h-3.5 w-3.5" />
+            Histórico
+          </button>
+        </div>
       </div>
+
+      {/* ── ABA HISTÓRICO ──────────────────────────────────────────── */}
+      {activeTab === "historico" && (
+        <div className="space-y-4">
+          {/* Filtros do histórico */}
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="text-xs font-medium block mb-1">Status</label>
+                  <select
+                    value={historyStatus}
+                    onChange={(e) => setHistoryStatus(e.target.value)}
+                    className="border rounded-md text-sm px-3 py-1.5 bg-background"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="reconciled">Resolvidas</option>
+                    <option value="ignored">Ignoradas</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium block mb-1">De</label>
+                  <input type="date" value={historyDateStart} onChange={(e) => setHistoryDateStart(e.target.value)}
+                    className="border rounded-md text-sm px-3 py-1.5 bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium block mb-1">Até</label>
+                  <input type="date" value={historyDateEnd} onChange={(e) => setHistoryDateEnd(e.target.value)}
+                    className="border rounded-md text-sm px-3 py-1.5 bg-background" />
+                </div>
+                <button
+                  onClick={loadHistory}
+                  disabled={historyLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm font-medium hover:bg-muted transition-colors"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${historyLoading ? "animate-spin" : ""}`} />
+                  Atualizar
+                </button>
+                {historyItems.length > 0 && (
+                  <button
+                    onClick={exportHistoryCSV}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm font-medium hover:bg-muted transition-colors ml-auto"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Exportar CSV
+                  </button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Tabela histórico */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                {historyItems.length} registro(s) no histórico
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {historyLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin h-7 w-7 border-4 border-primary border-t-transparent rounded-full" />
+                </div>
+              ) : historyItems.length === 0 ? (
+                <div className="text-center py-10">
+                  <History className="h-10 w-10 mx-auto mb-2 text-muted-foreground opacity-30" />
+                  <p className="text-sm text-muted-foreground">Nenhuma divergência resolvida ou ignorada ainda.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left py-2.5 px-3 text-xs font-medium">Data</th>
+                        <th className="text-left py-2.5 px-3 text-xs font-medium">Valor</th>
+                        <th className="text-left py-2.5 px-3 text-xs font-medium">Método</th>
+                        <th className="text-left py-2.5 px-3 text-xs font-medium">Tipo Divergência</th>
+                        <th className="text-left py-2.5 px-3 text-xs font-medium">Status</th>
+                        <th className="text-left py-2.5 px-3 text-xs font-medium">Resolvido em</th>
+                        <th className="text-left py-2.5 px-3 text-xs font-medium">Por</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historyItems.map((h) => (
+                        <tr key={h.id} className="border-b hover:bg-muted/20 transition-colors">
+                          <td className="py-2.5 px-3 text-xs">{fmtDate(h.transaction_date)}</td>
+                          <td className="py-2.5 px-3 font-medium text-sm">{fmtBRL(h.amount)}</td>
+                          <td className="py-2.5 px-3 text-xs">{METHOD_LABELS[h.method] ?? h.method}</td>
+                          <td className="py-2.5 px-3">
+                            {h.divergence_type ? (
+                              <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${DIVERGENCE_TYPES[h.divergence_type]?.color ?? "bg-gray-100 text-gray-700"}`}>
+                                {DIVERGENCE_TYPES[h.divergence_type]?.icon} {DIVERGENCE_TYPES[h.divergence_type]?.label ?? h.divergence_type}
+                              </span>
+                            ) : "—"}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              h.status === "reconciled" ? "bg-green-100 text-green-800"
+                              : h.status === "ignored"    ? "bg-gray-100 text-gray-700"
+                              : "bg-blue-100 text-blue-800"
+                            }`}>
+                              {h.status === "reconciled" ? "✅ Resolvida" : "🚫 Ignorada"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-xs text-muted-foreground">{fmtDate(h.resolved_at)}</td>
+                          <td className="py-2.5 px-3 text-xs text-muted-foreground truncate max-w-[120px]">{h.resolved_by ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── ABA ATIVAS ─────────────────────────────────────────────── */}
+      {activeTab === "ativas" && <>
 
       {/* Cards de contagem por tipo */}
       {items.length > 0 && (
@@ -544,7 +761,9 @@ export default function Discrepancies() {
         </Card>
       )}
 
-      {/* ── Dialogs ──────────────────────────────────────────────── */}
+      </> /* fim aba ativas */}
+
+      {/* ── Dialogs (controlados por estado open, fora das abas) ─────── */}
 
       {/* Classificar */}
       <Dialog open={classifyOpen} onOpenChange={setClassifyOpen}>

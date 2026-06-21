@@ -43,6 +43,19 @@ interface MethodPoint {
   total_count: number;
   reconciled_count: number;
   total_amount: number;
+  reconciled_amount: number;
+  divergent_count: number;
+  pending_count: number;
+  reconciliation_rate: number;
+}
+
+interface MonthComparison {
+  current_month_reconciled: number;
+  current_month_total: number;
+  current_month_divergent: number;
+  prev_month_reconciled: number;
+  prev_month_total: number;
+  prev_month_divergent: number;
 }
 
 const fmtBRL = (v: number) =>
@@ -63,6 +76,7 @@ export default function ConnectOverview() {
   const [kpis, setKpis] = useState<DashboardKPIs | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [methods, setMethods] = useState<MethodPoint[]>([]);
+  const [monthComp, setMonthComp] = useState<MonthComparison | null>(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [loading, setLoading] = useState(true);
   const [hasDemoData, setHasDemoData] = useState(false);
@@ -77,16 +91,22 @@ export default function ConnectOverview() {
     if (!profile?.store_id) return;
     setLoading(true);
     try {
-      const [kpiRes, trendRes, methodRes, alertRes] = await Promise.all([
+      // start_date = início do mês atual para breakdown
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+
+      const [kpiRes, trendRes, methodRes, compRes, alertRes] = await Promise.all([
         supabase.rpc("connect_get_dashboard_kpis", { p_store_id: profile.store_id }),
         supabase.rpc("get_reconciliation_trend_by_period", { p_store_id: profile.store_id, p_period: trendPeriod }),
-        supabase.rpc("get_reconciliation_by_method", { p_store_id: profile.store_id, p_period_days: 30 }),
+        supabase.rpc("get_reconciliation_by_method", { p_store_id: profile.store_id, p_start_date: monthStart }),
+        supabase.rpc("get_monthly_comparison", { p_store_id: profile.store_id }),
         supabase.rpc("get_unread_alert_count", { p_store_id: profile.store_id }),
       ]);
       if (kpiRes.error) throw kpiRes.error;
       setKpis(kpiRes.data as DashboardKPIs);
       setTrend((trendRes.data as TrendPoint[]) || []);
       setMethods((methodRes.data as MethodPoint[]) || []);
+      setMonthComp(compRes.data as MonthComparison | null);
       setUnreadAlerts((alertRes.data as number) || 0);
     } catch (e) {
       console.error("Connect KPI error:", e);
@@ -429,6 +449,54 @@ export default function ConnectOverview() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Comparativo mensal */}
+          {monthComp && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                {
+                  label: "Conciliado (mês atual)",
+                  current: monthComp.current_month_reconciled,
+                  prev:    monthComp.prev_month_reconciled,
+                  fmt: (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v),
+                  color: "text-green-600",
+                },
+                {
+                  label: "Total recebido (mês atual)",
+                  current: monthComp.current_month_total,
+                  prev:    monthComp.prev_month_total,
+                  fmt: (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v),
+                  color: "text-blue-600",
+                },
+                {
+                  label: "Divergências (mês atual)",
+                  current: monthComp.current_month_divergent,
+                  prev:    monthComp.prev_month_divergent,
+                  fmt: (v: number) => String(v),
+                  color: "text-red-600",
+                },
+              ].map(({ label, current, prev, fmt, color }) => {
+                const pct = prev > 0 ? ((current - prev) / prev) * 100 : 0;
+                const up = pct >= 0;
+                return (
+                  <Card key={label}>
+                    <CardContent className="pt-4">
+                      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                      <p className={`text-2xl font-bold ${color}`}>{fmt(current)}</p>
+                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                        <span>vs anterior: {fmt(prev)}</span>
+                        {prev > 0 && (
+                          <span className={`font-medium ${up ? "text-green-600" : "text-red-600"}`}>
+                            {up ? "+" : ""}{pct.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
 
           {/* Trend chart */}
           {hasTrend && (
