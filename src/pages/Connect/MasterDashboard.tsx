@@ -7,7 +7,7 @@ import {
 } from "recharts";
 import {
   Building2, RefreshCw, CheckCircle2, AlertCircle, WifiOff, Zap, TrendingUp,
-  CreditCard, Clock, Brain,
+  CreditCard, Brain, ArrowUpRight, ArrowDownRight, Trophy, Target,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useSuperAdmin } from "@/hooks/useSuperAdmin";
@@ -31,6 +31,20 @@ interface StoreRow {
   ai_insights_count:    number;
 }
 
+interface IAComparison {
+  store_id: string; store_name: string;
+  month_revenue: number; prev_month_revenue: number; revenue_growth_pct: number | null;
+  month_sales_count: number; delinquency_rate: number; overdue_amount: number;
+  reconciliation_rate: number; divergent_count: number; auto_rate: number;
+  health_score: number; active_connect: boolean;
+}
+
+interface IARanking {
+  category: string; rank_position: number;
+  store_id: string; store_name: string;
+  metric_value: number; metric_label: string; is_best: boolean;
+}
+
 interface Summary {
   total_stores:          number;
   stores_with_banks:     number;
@@ -46,6 +60,7 @@ interface Summary {
 
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(v ?? 0);
+const fmtPct = (v: number | null) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
 
 const fmtDT = (d: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "Nunca";
@@ -54,22 +69,29 @@ const fmtDT = (d: string | null) =>
 
 export default function MasterDashboardPage() {
   const { isSuperAdmin, loading: saLoading } = useSuperAdmin();
-  const [stores, setStores]   = useState<StoreRow[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [stores, setStores]       = useState<StoreRow[]>([]);
+  const [summary, setSummary]     = useState<Summary | null>(null);
+  const [iaComparison, setIAComp] = useState<IAComparison[]>([]);
+  const [iaRanking, setIARanking] = useState<IARanking[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [activeTab, setActiveTab] = useState<"lojas" | "ia">("lojas");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [storesRes, summaryRes] = await Promise.all([
+      const [storesRes, summaryRes, iaCompRes, iaRankRes] = await Promise.all([
         supabase.rpc("get_master_connect_dashboard"),
         supabase.rpc("get_master_connect_summary"),
+        supabase.rpc("get_master_ia_comparison"),
+        supabase.rpc("get_master_ia_ranking", { p_top: 3 }),
       ]);
       if (storesRes.error) throw storesRes.error;
       if (summaryRes.error) throw summaryRes.error;
       setStores((storesRes.data as StoreRow[]) ?? []);
       const s = Array.isArray(summaryRes.data) ? summaryRes.data[0] : summaryRes.data;
       setSummary(s as Summary ?? null);
+      setIAComp((iaCompRes.data as IAComparison[]) ?? []);
+      setIARanking((iaRankRes.data as IARanking[]) ?? []);
     } catch (e) {
       toast.error("Erro ao carregar master dashboard: " + String(e));
     } finally {
@@ -115,10 +137,22 @@ export default function MasterDashboardPage() {
             Visão consolidada de todas as lojas com Estokfy Connect ativo.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
-          Atualizar
-        </Button>
+        <div className="flex gap-2">
+          <div className="flex rounded-lg border overflow-hidden">
+            <button onClick={() => setActiveTab("lojas")}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors ${activeTab === "lojas" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+              Lojas
+            </button>
+            <button onClick={() => setActiveTab("ia")}
+              className={`px-3 py-1.5 text-xs font-medium flex items-center gap-1 transition-colors ${activeTab === "ia" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+              <Brain className="h-3 w-3" /> IA Financeira
+            </button>
+          </div>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       {loading && (
@@ -127,7 +161,7 @@ export default function MasterDashboardPage() {
         </div>
       )}
 
-      {!loading && summary && (
+      {!loading && summary && activeTab === "lojas" && (
         <>
           {/* KPIs globais */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -292,6 +326,136 @@ export default function MasterDashboardPage() {
             </CardContent>
           </Card>
         </>
+      )}
+      {!loading && activeTab === "ia" && (
+        <div className="space-y-5">
+          {/* IA Ranking por categoria */}
+          {iaRanking.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {["maior_faturamento","maior_crescimento","maior_inadimplencia","melhor_conciliacao","mais_divergencias"].map((cat) => {
+                const catRows = iaRanking.filter((r) => r.category === cat);
+                if (catRows.length === 0) return null;
+                const isBest = catRows[0]?.is_best;
+                const catLabel: Record<string, string> = {
+                  maior_faturamento:   "Maior Faturamento",
+                  maior_crescimento:   "Maior Crescimento",
+                  maior_inadimplencia: "Maior Inadimplência",
+                  melhor_conciliacao:  "Melhor Conciliação",
+                  mais_divergencias:   "Mais Divergências",
+                };
+                return (
+                  <Card key={cat}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        {isBest ? <Trophy className="h-4 w-4 text-yellow-500" /> : <Target className="h-4 w-4 text-red-500" />}
+                        {catLabel[cat]}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {catRows.map((r) => (
+                        <div key={r.store_id} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center ${
+                              r.rank_position === 1 ? "bg-yellow-100 text-yellow-800" :
+                              r.rank_position === 2 ? "bg-gray-100 text-gray-700" :
+                              "bg-orange-50 text-orange-700"
+                            }`}>
+                              {r.rank_position}
+                            </span>
+                            <span className="text-sm font-medium">{r.store_name}</span>
+                          </div>
+                          <span className="text-sm font-semibold">
+                            {cat.includes("faturamento") || cat.includes("inadimplencia")
+                              ? `R$ ${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(r.metric_value)}`
+                              : `${r.metric_value?.toFixed(1)}${r.metric_label.includes("%") ? "%" : ""}`}
+                          </span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Tabela comparativa IA */}
+          {iaComparison.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Brain className="h-4 w-4 text-purple-600" />
+                  Comparativo IA — todas as lojas
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left py-2 px-3">Loja</th>
+                        <th className="text-right py-2 px-3">Faturamento</th>
+                        <th className="text-center py-2 px-3">Crescimento</th>
+                        <th className="text-center py-2 px-3">Inadimpl.</th>
+                        <th className="text-center py-2 px-3">Conciliação</th>
+                        <th className="text-center py-2 px-3">Divergências</th>
+                        <th className="text-center py-2 px-3">Saúde</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {iaComparison.map((s) => (
+                        <tr key={s.store_id} className="border-b hover:bg-muted/20 transition-colors">
+                          <td className="py-2 px-3 font-medium">{s.store_name}</td>
+                          <td className="py-2 px-3 text-right">{fmtBRL(s.month_revenue)}</td>
+                          <td className="py-2 px-3 text-center">
+                            {s.revenue_growth_pct == null ? "—" : (
+                              <span className={`flex items-center justify-center gap-0.5 text-xs font-semibold ${s.revenue_growth_pct >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                {s.revenue_growth_pct >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                                {Math.abs(s.revenue_growth_pct).toFixed(1)}%
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={`text-xs font-semibold ${s.delinquency_rate > 20 ? "text-red-600" : s.delinquency_rate > 10 ? "text-yellow-600" : "text-green-600"}`}>
+                              {s.delinquency_rate.toFixed(1)}%
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={`text-xs font-semibold ${s.reconciliation_rate >= 80 ? "text-green-600" : s.reconciliation_rate >= 60 ? "text-yellow-600" : "text-red-600"}`}>
+                              {s.reconciliation_rate.toFixed(1)}%
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-center text-xs">
+                            {s.divergent_count > 0
+                              ? <span className="text-red-600 font-semibold">{s.divergent_count}</span>
+                              : <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mx-auto" />}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                              s.health_score >= 75 ? "bg-green-100 text-green-800" :
+                              s.health_score >= 50 ? "bg-yellow-100 text-yellow-800" :
+                              "bg-red-100 text-red-800"
+                            }`}>
+                              {s.health_score}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {iaComparison.length === 0 && (
+            <Card>
+              <CardContent className="pt-10 text-center pb-10">
+                <Brain className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">Nenhuma loja com dados suficientes para análise de IA.</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );

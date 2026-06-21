@@ -601,6 +601,7 @@ export default function ConnectOverview() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { to: "/connect/bancos",         icon: "🏦", label: "Bancos",        desc: "Gerenciar conexões" },
+            { to: "/connect/ia",              icon: "🤖", label: "Central IA",    desc: "Consultor financeiro" },
             { to: "/connect/saude",           icon: "💚", label: "Saúde",         desc: "Monitor de conexão" },
             { to: "/connect/transacoes",      icon: "💳", label: "Transações",    desc: "Histórico completo" },
             { to: "/connect/conciliacao",     icon: "⚡", label: "Conciliação",   desc: "Revisar pendências" },
