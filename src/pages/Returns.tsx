@@ -377,7 +377,7 @@ export default function Returns() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {canManageEmployees && (
-            <EmployeeFilter value={sellerId} onChange={setSellerId} className="h-9 w-[200px]" />
+            <EmployeeFilter value={sellerId} onChange={(id) => setSellerId(id)} className="h-9 w-[200px]" />
           )}
           <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>

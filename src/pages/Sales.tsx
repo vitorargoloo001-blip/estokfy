@@ -209,7 +209,7 @@ export default function Sales() {
               </div>
               {canManageEmployees && (
                 <div className="space-y-1"><Label className="text-xs">Vendedor</Label>
-                  <EmployeeFilter value={sellerId} onChange={setSellerId} className="h-11" />
+                  <EmployeeFilter value={sellerId} onChange={(id) => setSellerId(id)} className="h-11" />
                 </div>
               )}
               <div className="space-y-1 sm:col-span-2 lg:col-span-4"><Label className="text-xs">Observação</Label>

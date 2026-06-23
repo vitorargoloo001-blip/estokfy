@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/api';
 import { toast } from 'sonner';
@@ -279,6 +280,7 @@ function DeltaBadge({ d, invert = false }: { d: { pct: number; positive: boolean
 export default function Reports() {
   const { profile } = useAuth();
   const { canManageEmployees } = usePermissions();
+  const location = useLocation();
   const storeId = profile?.store_id;
   const [data, setData] = useState<ReportDetailed | null>(null);
   const [loading, setLoading] = useState(false);
@@ -293,7 +295,9 @@ export default function Reports() {
   const [aiLoading, setAiLoading] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [compareEnabled, setCompareEnabled] = useState(false);
-  const [sellerId, setSellerId] = useState<string | null>(null);
+  const locationState = location.state as { sellerId?: string; sellerName?: string } | null;
+  const [sellerId, setSellerId] = useState<string | null>(locationState?.sellerId ?? null);
+  const [sellerName, setSellerName] = useState<string | null>(locationState?.sellerName ?? null);
   const [auditOpen, setAuditOpen] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1018,7 +1022,11 @@ export default function Reports() {
           {canManageEmployees && (
             <div className="space-y-1">
               <Label className="text-xs">Vendedor</Label>
-              <EmployeeFilter value={sellerId} onChange={setSellerId} className="min-w-[200px]" />
+              <EmployeeFilter
+                value={sellerId}
+                onChange={(id, name) => { setSellerId(id); setSellerName(name); }}
+                className="min-w-[200px]"
+              />
             </div>
           )}
           {storeId && (
@@ -1046,6 +1054,19 @@ export default function Reports() {
           to={to}
           employeeId={sellerId}
         />
+      )}
+
+      {sellerId && sellerName && (
+        <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">Filtrando vendas feitas por:</span>
+          <span className="font-semibold text-primary">{sellerName}</span>
+          <button
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground underline"
+            onClick={() => { setSellerId(null); setSellerName(null); }}
+          >
+            Limpar filtro
+          </button>
+        </div>
       )}
 
       {loading && !data && <p className="text-muted-foreground">Carregando relatório...</p>}

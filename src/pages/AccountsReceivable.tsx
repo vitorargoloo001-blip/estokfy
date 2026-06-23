@@ -582,7 +582,7 @@ export default function AccountsReceivable() {
           A vencer
         </Button>
         {canManageEmployees && (
-          <EmployeeFilter value={sellerId} onChange={setSellerId} className="h-9 w-[200px]" />
+          <EmployeeFilter value={sellerId} onChange={(id) => setSellerId(id)} className="h-9 w-[200px]" />
         )}
         {isMobile && (
           <Sheet open={mobileListOpen} onOpenChange={setMobileListOpen}>

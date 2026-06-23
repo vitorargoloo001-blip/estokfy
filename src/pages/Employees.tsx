@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -13,7 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from 'sonner';
-import { UserPlus, MoreVertical, BarChart3, Pencil, KeyRound, Trash2, Ban, CheckCircle } from 'lucide-react';
+import { UserPlus, MoreVertical, BarChart3, Pencil, KeyRound, Trash2, Ban, CheckCircle, LineChart } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { startOfMonthUTCISO, startOfTodayUTCISO } from '@/lib/dateBR';
 import { ROLE_LABEL } from '@/lib/roleAccess';
@@ -42,6 +43,7 @@ const fmtBRL = (n: number) => Number(n).toLocaleString('pt-BR', { style: 'curren
 export default function Employees() {
   const { profile } = useAuth();
   const { canManageEmployees, isOwner } = usePermissions();
+  const navigate = useNavigate();
   const [list, setList] = useState<Employee[]>([]);
   const [phones, setPhones] = useState<Record<string, string | null>>({});
   const [perfMonth, setPerfMonth] = useState<Record<string, PerfRow>>({});
@@ -152,6 +154,9 @@ export default function Employees() {
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => openDrawer(e)}>
                             <BarChart3 className="mr-2 h-4 w-4" />Ver desempenho
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate('/relatorios', { state: { sellerId: e.profile_id, sellerName: e.full_name } })}>
+                            <LineChart className="mr-2 h-4 w-4" />Ver relatório
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setEditTarget({ ...e, phone: phones[e.profile_id] })}>
                             <Pencil className="mr-2 h-4 w-4" />Editar
