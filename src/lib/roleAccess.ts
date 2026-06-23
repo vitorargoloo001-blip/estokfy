@@ -10,7 +10,7 @@ const ROLE_ROUTES: Record<AppRole, string[]> = {
   manager: ['/', '/relatorios', '/relatorios/compras', '/produtos', '/categorias', '/estoque',
     '/produtos-parados', '/vendas', '/contas-a-receber', '/contas-a-pagar', '/clientes',
     '/fidelidade', '/creditos', '/entregas', '/trocas', '/funcionarios', '/financeiro', '/historico',
-    '/pixel', '/os', '/connect', '/ajuda'],
+    '/pixel', '/os', '/connect', '/ai', '/ajuda'],
   sales: ['/', '/vendas', '/clientes', '/fidelidade', '/creditos', '/entregas', '/trocas', '/contas-a-receber', '/os', '/ajuda'],
   stock: ['/', '/produtos', '/categorias', '/estoque', '/produtos-parados', '/relatorios/compras', '/os', '/ajuda'],
   finance: ['/', '/contas-a-receber', '/contas-a-pagar', '/financeiro', '/relatorios', '/clientes', '/creditos', '/connect', '/os', '/ajuda'],

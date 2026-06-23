@@ -75,6 +75,11 @@ const ConnectAI = lazy(() => import("./pages/Connect/ConnectAI"));
 const ConnectAutomations = lazy(() => import("./pages/Connect/ConnectAutomations"));
 // Finance Platform (Block 8)
 const FinanceDashboard = lazy(() => import("./pages/Finance/FinanceDashboard"));
+// AI Copilot (Block 9)
+const AIAssistant = lazy(() => import("./pages/AI/AIAssistant"));
+const AIInsights = lazy(() => import("./pages/AI/AIInsights"));
+const CEODashboard = lazy(() => import("./pages/AI/CEODashboard"));
+const SuperAdminAI = lazy(() => import("./pages/super-admin/SuperAdminAI"));
 const FluxoCaixa = lazy(() => import("./pages/Finance/FluxoCaixa"));
 const DRE = lazy(() => import("./pages/Finance/DRE"));
 const Metas = lazy(() => import("./pages/Finance/Metas"));
@@ -174,6 +179,10 @@ function ProtectedRoutes() {
             <Route path="finance/fluxo-caixa" element={<RequireRoleRoute><FluxoCaixa /></RequireRoleRoute>} />
             <Route path="finance/dre" element={<RequireRoleRoute><DRE /></RequireRoleRoute>} />
             <Route path="finance/metas" element={<RequireRoleRoute><Metas /></RequireRoleRoute>} />
+            {/* AI Copilot */}
+            <Route path="ai" element={<RequireRoleRoute><AIAssistant /></RequireRoleRoute>} />
+            <Route path="ai/insights" element={<RequireRoleRoute><AIInsights /></RequireRoleRoute>} />
+            <Route path="ai/ceo" element={<RequireRoleRoute><CEODashboard /></RequireRoleRoute>} />
             <Route path="ajuda" element={<Help />} />
           </Route>
           <Route path="apresentacao" element={<Presentation />} />
@@ -244,6 +253,7 @@ const App = () => (
                   <Route path="connect/licenses" element={<ConnectLicenses />} />
                   <Route path="connect/master" element={<ConnectMasterDashboard />} />
                   <Route path="financeiro" element={<FinancialDashboard />} />
+                  <Route path="ai" element={<SuperAdminAI />} />
                   <Route path="payment-verifications" element={<SuperAdminPaymentVerifications />} />
                 </Route>
                 <Route path="/*" element={<ProtectedRoutes />} />

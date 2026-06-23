@@ -30,6 +30,9 @@ import {
   Banknote,
   AlertTriangle,
   ScrollText,
+  BrainCircuit,
+  Target,
+  Lightbulb,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -39,6 +42,16 @@ import { useLowStockAlert } from '@/hooks/useLowStockAlert';
 import { useSuperAdmin } from '@/hooks/useSuperAdmin';
 import { useConnectModuleAccess } from '@/hooks/useConnectModuleAccess';
 import { canAccessRoute } from '@/lib/roleAccess';
+
+// Estokfy AI — shown for owner/admin/manager only (checked via canAccessRoute)
+const aiSection = {
+  label: 'Estokfy IA',
+  items: [
+    { to: '/ai', icon: BrainCircuit, label: 'Copiloto IA' },
+    { to: '/ai/insights', icon: Lightbulb, label: 'Insights' },
+    { to: '/ai/ceo', icon: Target, label: 'Dashboard CEO' },
+  ],
+};
 
 // Estokfy Connect — only shown when the store's `connect` module is licensed/active
 const connectSection = {
@@ -110,7 +123,9 @@ function AppSidebarImpl() {
   // SINGLE SOURCE OF TRUTH: Connect group appears only when the store's `connect` module
   // is active (hasModule). No super-admin bypass — same gate as the route and the page,
   // so "menu aparece ⟺ página abre". Super admin manages licenses via the Super Admin area.
-  const allSections = connectEnabled ? [...sections, connectSection] : sections;
+  const canAccessAI = ['owner', 'admin', 'manager'].includes(profile?.role ?? '');
+  const sectionsWithAI = canAccessAI ? [...sections, aiSection] : sections;
+  const allSections = connectEnabled ? [...sectionsWithAI, connectSection] : sectionsWithAI;
   const visibleSections = allSections
     .map((s) => ({
       ...s,
