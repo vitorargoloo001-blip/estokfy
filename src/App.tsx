@@ -72,6 +72,7 @@ const ConnectAIInsights = lazy(() => import("./pages/Connect/AIInsights"));
 const ConnectCashFlow = lazy(() => import("./pages/Connect/CashFlowForecast"));
 const ConnectMasterDashboard = lazy(() => import("./pages/Connect/MasterDashboard"));
 const ConnectAI = lazy(() => import("./pages/Connect/ConnectAI"));
+const ConnectAutomations = lazy(() => import("./pages/Connect/ConnectAutomations"));
 const SuperAdminModuleLicensing = lazy(() => import("./pages/super-admin/SuperAdminModuleLicensing"));
 const FinancialDashboard = lazy(() => import("./pages/super-admin/FinancialDashboard"));
 
@@ -162,6 +163,7 @@ function ProtectedRoutes() {
             <Route path="connect/insights" element={<RequireConnectModule><ConnectAIInsights /></RequireConnectModule>} />
             <Route path="connect/fluxo" element={<RequireConnectModule><ConnectCashFlow /></RequireConnectModule>} />
             <Route path="connect/ia" element={<RequireConnectModule><ConnectAI /></RequireConnectModule>} />
+            <Route path="connect/automacoes" element={<RequireConnectModule><ConnectAutomations /></RequireConnectModule>} />
             <Route path="ajuda" element={<Help />} />
           </Route>
           <Route path="apresentacao" element={<Presentation />} />

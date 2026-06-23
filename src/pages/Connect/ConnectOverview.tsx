@@ -610,6 +610,7 @@ export default function ConnectOverview() {
             { to: "/connect/fluxo",           icon: "📈", label: "Fluxo de Caixa", desc: "Previsão financeira" },
             { to: "/connect/relatorios",      icon: "📊", label: "Relatórios",    desc: "PDF / Excel / CSV" },
             { to: "/connect/alertas",         icon: "🔔", label: "Alertas",       desc: unreadAlerts > 0 ? `${unreadAlerts} não lido(s)` : "Notificações" },
+            { to: "/connect/automacoes",       icon: "🤖", label: "Automações",    desc: "Ações automáticas" },
             { to: "/connect/auditoria",       icon: "📋", label: "Auditoria",     desc: "Histórico de ações" },
             { to: "/connect/configuracoes",   icon: "⚙️", label: "Configurações", desc: "Ajustar parâmetros" },
           ].map(({ to, icon, label, desc }) => (
