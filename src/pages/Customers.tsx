@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Plus, Search, Edit, Users, Loader2, ChevronLeft, ChevronRight, Eye, Download } from 'lucide-react';
+import { Plus, Search, Edit, Users, Loader2, ChevronLeft, ChevronRight, Eye, Download, Trash2 } from 'lucide-react';
 import Customer360Dialog from '@/components/Customer360Dialog';
 import { downloadCsv } from '@/lib/receipt';
 import { toast } from 'sonner';
@@ -65,6 +65,23 @@ export default function Customers() {
 
   const openNew = () => { setEditing(null); setForm({ name: '', phone: '', email: '', doc_id: '' }); setErrors({}); setDialogOpen(true); };
   const openEdit = (c: Customer) => { setEditing(c); setForm({ name: c.name, phone: c.phone || '', email: c.email || '', doc_id: c.doc_id || '' }); setErrors({}); setDialogOpen(true); };
+
+  const handleDelete = async (c: Customer) => {
+    if (!confirm(`Excluir o cliente "${c.name}"? Esta ação não pode ser desfeita.`)) return;
+    try {
+      const { error } = await supabase.from('customers').delete().eq('id', c.id);
+      if (error) throw error;
+      toast.success('Cliente excluído.');
+      fetchCustomers();
+    } catch (err: any) {
+      const msg = err.message || '';
+      if (msg.includes('foreign key') || msg.includes('violates')) {
+        toast.error('Não é possível excluir: este cliente possui vendas ou histórico associado.');
+      } else {
+        toast.error(msg || 'Erro ao excluir cliente.');
+      }
+    }
+  };
 
   const validate = (): boolean => {
     const e: FormErrors = {};
@@ -163,9 +180,14 @@ export default function Customers() {
                       {c.phone || 'Sem telefone'} {c.email ? `• ${c.email}` : ''}
                     </p>
                   </div>
-                  <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={(e) => { e.stopPropagation(); openEdit(c); }}>
-                    <Edit className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(c)}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDelete(c)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -190,6 +212,7 @@ export default function Customers() {
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                         <Button variant="ghost" size="icon" onClick={() => setView360Id(c.id)} title="Visão 360"><Eye className="h-4 w-4" /></Button>
                         <Button variant="ghost" size="icon" onClick={() => openEdit(c)} title="Editar"><Edit className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(c)} title="Excluir" className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     </TableCell>
                   </TableRow>
