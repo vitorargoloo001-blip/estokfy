@@ -73,6 +73,11 @@ const ConnectCashFlow = lazy(() => import("./pages/Connect/CashFlowForecast"));
 const ConnectMasterDashboard = lazy(() => import("./pages/Connect/MasterDashboard"));
 const ConnectAI = lazy(() => import("./pages/Connect/ConnectAI"));
 const ConnectAutomations = lazy(() => import("./pages/Connect/ConnectAutomations"));
+// Finance Platform (Block 8)
+const FinanceDashboard = lazy(() => import("./pages/Finance/FinanceDashboard"));
+const FluxoCaixa = lazy(() => import("./pages/Finance/FluxoCaixa"));
+const DRE = lazy(() => import("./pages/Finance/DRE"));
+const Metas = lazy(() => import("./pages/Finance/Metas"));
 const SuperAdminModuleLicensing = lazy(() => import("./pages/super-admin/SuperAdminModuleLicensing"));
 const FinancialDashboard = lazy(() => import("./pages/super-admin/FinancialDashboard"));
 
@@ -164,6 +169,11 @@ function ProtectedRoutes() {
             <Route path="connect/fluxo" element={<RequireConnectModule><ConnectCashFlow /></RequireConnectModule>} />
             <Route path="connect/ia" element={<RequireConnectModule><ConnectAI /></RequireConnectModule>} />
             <Route path="connect/automacoes" element={<RequireConnectModule><ConnectAutomations /></RequireConnectModule>} />
+            {/* Finance Platform */}
+            <Route path="finance/dashboard" element={<RequireRoleRoute><FinanceDashboard /></RequireRoleRoute>} />
+            <Route path="finance/fluxo-caixa" element={<RequireRoleRoute><FluxoCaixa /></RequireRoleRoute>} />
+            <Route path="finance/dre" element={<RequireRoleRoute><DRE /></RequireRoleRoute>} />
+            <Route path="finance/metas" element={<RequireRoleRoute><Metas /></RequireRoleRoute>} />
             <Route path="ajuda" element={<Help />} />
           </Route>
           <Route path="apresentacao" element={<Presentation />} />
