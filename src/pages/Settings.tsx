@@ -28,6 +28,8 @@ import PrintingSettings from '@/components/settings/PrintingSettings';
 import { cn } from '@/lib/utils';
 import { maskCNPJ, maskPhone, maskCEP, validateCNPJ, validatePhone, validateCEP } from '@/lib/masks';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { BUSINESS_TYPE_OPTIONS } from '@/lib/businessProfiles';
+import { useBusinessLabels } from '@/hooks/useBusinessLabels';
 
 const TABS = [
   { id: 'store', label: 'Dados da Loja', icon: Store },
@@ -150,7 +152,63 @@ function StoreTab() {
           </div>
         </div>
       </div>
+      <Separator />
+      <SectionTitle description="Define como o Estokfy se adapta ao seu segmento: menus, terminologia e campos específicos.">
+        Perfil do Negócio
+      </SectionTitle>
+      {profile?.store_id && (
+        <BusinessTypeSelector storeId={profile.store_id} currentType={store.business_type} />
+      )}
       <SaveBar dirty={dirty} saving={saving} onSave={save} />
+    </div>
+  );
+}
+
+function BusinessTypeSelector({ storeId, currentType }: { storeId: string; currentType?: string }) {
+  const { invalidate } = useBusinessLabels();
+  const [savingType, setSavingType] = useState(false);
+  const [value, setValue] = useState(currentType || 'retail');
+
+  useEffect(() => { if (currentType) setValue(currentType); }, [currentType]);
+
+  const handleChange = async (v: string) => {
+    setValue(v);
+    setSavingType(true);
+    const { error } = await supabase.rpc('set_store_business_type' as any, {
+      p_store_id: storeId,
+      p_business_type: v,
+    });
+    setSavingType(false);
+    if (error) { toast.error('Erro ao salvar tipo de negócio'); return; }
+    invalidate();
+    toast.success('Tipo de negócio atualizado! Recarregue a página para ver as mudanças.');
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {BUSINESS_TYPE_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => handleChange(opt.value)}
+            disabled={savingType}
+            className={cn(
+              'flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition-all text-left',
+              value === opt.value
+                ? 'border-primary bg-primary/5 text-primary'
+                : 'border-border hover:border-primary/40 hover:bg-muted/40'
+            )}
+          >
+            {value === opt.value && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {savingType && (
+        <p className="text-xs text-muted-foreground flex items-center gap-1">
+          <Loader2 className="h-3 w-3 animate-spin" /> Salvando...
+        </p>
+      )}
     </div>
   );
 }

@@ -42,6 +42,7 @@ import { useLowStockAlert } from '@/hooks/useLowStockAlert';
 import { useSuperAdmin } from '@/hooks/useSuperAdmin';
 import { useConnectModuleAccess } from '@/hooks/useConnectModuleAccess';
 import { canAccessRoute } from '@/lib/roleAccess';
+import { useBusinessLabels } from '@/hooks/useBusinessLabels';
 
 // Estokfy AI — shown for owner/admin/manager only (checked via canAccessRoute)
 const aiSection = {
@@ -120,13 +121,21 @@ function AppSidebarImpl() {
   const { isSuperAdmin } = useSuperAdmin();
   const { canManageEmployees } = usePermissions();
   const { canAccess: connectEnabled } = useConnectModuleAccess();
+  const { labels } = useBusinessLabels();
   // SINGLE SOURCE OF TRUTH: Connect group appears only when the store's `connect` module
   // is active (hasModule). No super-admin bypass — same gate as the route and the page,
   // so "menu aparece ⟺ página abre". Super admin manages licenses via the Super Admin area.
   const canAccessAI = ['owner', 'admin', 'manager'].includes(profile?.role ?? '');
   const sectionsWithAI = canAccessAI ? [...sections, aiSection] : sections;
   const allSections = connectEnabled ? [...sectionsWithAI, connectSection] : sectionsWithAI;
-  const visibleSections = allSections
+  // Apply dynamic label to OS item based on business type
+  const allSectionsWithLabels = allSections.map(section => ({
+    ...section,
+    items: section.items.map(item =>
+      item.to === '/os' ? { ...item, label: labels.work_order } : item,
+    ),
+  }));
+  const visibleSections = allSectionsWithLabels
     .map((s) => ({
       ...s,
       items: s.items.filter((i) => {

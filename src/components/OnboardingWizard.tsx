@@ -3,9 +3,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Store, Package, ShoppingCart, Settings, CheckCircle2 } from 'lucide-react';
+import { Store, Package, ShoppingCart, Settings, CheckCircle2, LayoutGrid } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { BUSINESS_TYPE_OPTIONS, BusinessType } from '@/lib/businessProfiles';
+import { cn } from '@/lib/utils';
 
-const STEPS = [
+const SETUP_STEPS = [
   {
     icon: Store,
     title: 'Dados da Loja',
@@ -32,20 +35,37 @@ const STEPS = [
   },
 ];
 
+const TOTAL_STEPS = SETUP_STEPS.length + 1; // +1 for business type step (index 0)
+
 export default function OnboardingWizard() {
-  const { needsOnboarding, dismissOnboarding } = useAuth();
+  const { needsOnboarding, dismissOnboarding, profile } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
+  const [selectedBiz, setSelectedBiz] = useState<BusinessType>('retail');
+  const [savingBiz, setSavingBiz] = useState(false);
 
   if (!needsOnboarding) return null;
 
-  const current = STEPS[step];
-  const isLast = step === STEPS.length - 1;
-  const Icon = current.icon;
+  const isBusinessStep = step === 0;
+  const setupStep = step - 1;
+  const current = isBusinessStep ? null : SETUP_STEPS[setupStep];
+  const isLast = step === TOTAL_STEPS - 1;
+
+  const handleSelectBiz = async (type: BusinessType) => {
+    setSelectedBiz(type);
+    if (!profile?.store_id) return;
+    setSavingBiz(true);
+    await supabase.rpc('set_store_business_type' as any, {
+      p_store_id: profile.store_id,
+      p_business_type: type,
+    });
+    setSavingBiz(false);
+  };
 
   const handleAction = () => {
+    if (isBusinessStep) { setStep(1); return; }
     dismissOnboarding();
-    navigate(current.route);
+    navigate(current!.route);
   };
 
   return (
@@ -64,7 +84,7 @@ export default function OnboardingWizard() {
         <div className="space-y-4 py-2">
           {/* Step indicator */}
           <div className="flex gap-1.5 justify-center">
-            {STEPS.map((_, i) => (
+            {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
               <div
                 key={i}
                 className={`h-1.5 rounded-full transition-all ${
@@ -74,14 +94,49 @@ export default function OnboardingWizard() {
             ))}
           </div>
 
-          {/* Current step */}
-          <div className="text-center space-y-3 py-4">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-              <Icon className="h-7 w-7 text-primary" />
+          {isBusinessStep ? (
+            /* Business type selection step */
+            <div className="space-y-3">
+              <div className="text-center space-y-2 py-2">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                  <LayoutGrid className="h-7 w-7 text-primary" />
+                </div>
+                <h3 className="font-semibold text-lg">Qual tipo de negócio você gerencia?</h3>
+                <p className="text-sm text-muted-foreground">
+                  O Estokfy vai adaptar menus e termos para o seu segmento.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+                {BUSINESS_TYPE_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => handleSelectBiz(opt.value)}
+                    disabled={savingBiz}
+                    className={cn(
+                      'flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all text-left',
+                      selectedBiz === opt.value
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-border hover:border-primary/30 hover:bg-muted/30'
+                    )}
+                  >
+                    {selectedBiz === opt.value && (
+                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    )}
+                    <span className="truncate">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <h3 className="font-semibold text-lg">{current.title}</h3>
-            <p className="text-sm text-muted-foreground">{current.description}</p>
-          </div>
+          ) : (
+            /* Regular setup step */
+            <div className="text-center space-y-3 py-4">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                {current && <current.icon className="h-7 w-7 text-primary" />}
+              </div>
+              <h3 className="font-semibold text-lg">{current?.title}</h3>
+              <p className="text-sm text-muted-foreground">{current?.description}</p>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-2">
@@ -91,8 +146,8 @@ export default function OnboardingWizard() {
               </Button>
             )}
             {!isLast ? (
-              <Button className="flex-1" onClick={() => setStep(step + 1)}>
-                Próximo
+              <Button className="flex-1" onClick={handleAction} disabled={savingBiz}>
+                {isBusinessStep ? 'Continuar' : 'Próximo'}
               </Button>
             ) : (
               <Button className="flex-1" onClick={handleAction}>

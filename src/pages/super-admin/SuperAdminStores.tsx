@@ -12,6 +12,7 @@ import { Search, ShieldCheck, ShieldOff, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { BUSINESS_TYPE_OPTIONS, BusinessType } from '@/lib/businessProfiles';
 
 interface StoreRow {
   id: string;
@@ -22,7 +23,12 @@ interface StoreRow {
   access_enabled: boolean;
   created_at: string;
   expires_at: string | null;
+  business_type: string | null;
 }
+
+const BIZ_LABEL: Record<string, string> = Object.fromEntries(
+  BUSINESS_TYPE_OPTIONS.map(o => [o.value, o.label]),
+);
 
 const STATUS_LABELS: Record<string, string> = {
   active: 'Ativo',
@@ -50,13 +56,14 @@ export default function SuperAdminStores() {
   const [stores, setStores] = useState<StoreRow[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [bizFilter, setBizFilter] = useState('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { fetchStores(); }, []);
 
   const fetchStores = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('stores').select('id, name, email, plan, subscription_status, access_enabled, created_at, expires_at');
+    const { data, error } = await supabase.from('stores').select('id, name, email, plan, subscription_status, access_enabled, created_at, expires_at, business_type');
     if (!error && data) setStores(data as StoreRow[]);
     setLoading(false);
   };
@@ -80,10 +87,21 @@ export default function SuperAdminStores() {
     fetchStores();
   };
 
+  const setBusinessType = async (store: StoreRow, biz: string) => {
+    const { error } = await supabase.rpc('super_admin_set_business_type' as any, {
+      p_store_id: store.id,
+      p_business_type: biz,
+    });
+    if (error) { toast.error('Erro ao atualizar segmento'); return; }
+    toast.success('Segmento atualizado');
+    fetchStores();
+  };
+
   const filtered = stores.filter(s => {
     const matchSearch = !search || s.name.toLowerCase().includes(search.toLowerCase()) || (s.email || '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'all' || s.subscription_status === statusFilter || (statusFilter === 'blocked' && !s.access_enabled);
-    return matchSearch && matchStatus;
+    const matchBiz = bizFilter === 'all' || (s.business_type || 'retail') === bizFilter;
+    return matchSearch && matchStatus && matchBiz;
   });
 
   return (
@@ -98,12 +116,21 @@ export default function SuperAdminStores() {
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="all">Todos status</SelectItem>
             <SelectItem value="active">Ativos</SelectItem>
             <SelectItem value="suspended">Suspensos</SelectItem>
             <SelectItem value="blocked">Bloqueados</SelectItem>
             <SelectItem value="trial">Trial</SelectItem>
             <SelectItem value="overdue">Inadimplentes</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={bizFilter} onValueChange={setBizFilter}>
+          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos segmentos</SelectItem>
+            {BUSINESS_TYPE_OPTIONS.map(o => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -149,6 +176,7 @@ export default function SuperAdminStores() {
                 <TableRow>
                   <TableHead>Loja</TableHead>
                   <TableHead>E-mail</TableHead>
+                  <TableHead>Segmento</TableHead>
                   <TableHead>Plano</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Acesso</TableHead>
@@ -161,6 +189,21 @@ export default function SuperAdminStores() {
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.name}</TableCell>
                     <TableCell className="text-muted-foreground">{s.email || '—'}</TableCell>
+                    <TableCell>
+                      <Select
+                        value={s.business_type || 'retail'}
+                        onValueChange={v => setBusinessType(s, v)}
+                      >
+                        <SelectTrigger className="h-7 text-xs w-36 border-0 shadow-none px-2">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BUSINESS_TYPE_OPTIONS.map(o => (
+                            <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
                     <TableCell>{s.plan}</TableCell>
                     <TableCell>
                       <Badge variant={STATUS_VARIANT[s.subscription_status] || 'outline'}>

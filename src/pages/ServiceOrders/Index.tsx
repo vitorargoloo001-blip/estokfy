@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Plus, Wrench, Clock, Package, CheckCircle2, DollarSign, Search } from 'lucide-react';
 import { StatusBadge } from '@/components/service-orders/StatusBadge';
 import { SO_STATUS, SO_STATUS_LABEL, ServiceOrderStatus, formatBRL } from '@/lib/serviceOrderStatus';
+import { useBusinessLabels } from '@/hooks/useBusinessLabels';
 
 interface SO {
   id: string;
@@ -29,6 +30,7 @@ interface SO {
 export default function ServiceOrdersIndex() {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const { labels } = useBusinessLabels();
   const [rows, setRows] = useState<SO[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
@@ -76,16 +78,16 @@ export default function ServiceOrdersIndex() {
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Wrench className="h-6 w-6 text-primary" /> Ordens de Serviço</h1>
-          <p className="text-sm text-muted-foreground">Gerencie reparos, peças e entregas técnicas</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Wrench className="h-6 w-6 text-primary" /> {labels.work_order}s</h1>
+          <p className="text-sm text-muted-foreground">Gerencie atendimentos, serviços e entregas</p>
         </div>
-        <Button onClick={() => navigate('/os/nova')}><Plus className="h-4 w-4 mr-2" />Nova OS</Button>
+        <Button onClick={() => navigate('/os/nova')}><Plus className="h-4 w-4 mr-2" />Nova {labels.work_order}</Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard icon={Wrench} label="Abertas" value={stats.abertas} />
         <StatCard icon={Clock} label="Em andamento" value={stats.andamento} />
-        <StatCard icon={Package} label="Aguard. peça" value={stats.aguardandoPeca} />
+        <StatCard icon={Package} label={`Aguard. ${labels.product}`} value={stats.aguardandoPeca} />
         <StatCard icon={CheckCircle2} label="Finalizadas hoje" value={stats.finalizadasHoje} />
         <StatCard icon={DollarSign} label="Previsto" value={formatBRL(stats.valorPrevisto)} />
         <StatCard icon={DollarSign} label="Recebido" value={formatBRL(stats.valorRecebido)} />
@@ -93,7 +95,7 @@ export default function ServiceOrdersIndex() {
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Buscar por nº OS, cliente, aparelho..." value={q} onChange={e => setQ(e.target.value)} className="pl-9" />
+        <Input placeholder={`Buscar por nº, cliente, ${labels.equipment.toLowerCase()}...`} value={q} onChange={e => setQ(e.target.value)} className="pl-9" />
       </div>
 
       <Tabs value={tab} onValueChange={v => setTab(v as any)}>
@@ -111,7 +113,7 @@ export default function ServiceOrdersIndex() {
                   <tr>
                     <th className="text-left px-4 py-2">OS</th>
                     <th className="text-left px-4 py-2">Cliente</th>
-                    <th className="text-left px-4 py-2">Aparelho</th>
+                    <th className="text-left px-4 py-2">{labels.equipment}</th>
                     <th className="text-left px-4 py-2">Entrada</th>
                     <th className="text-left px-4 py-2">Status</th>
                     <th className="text-right px-4 py-2">Total</th>

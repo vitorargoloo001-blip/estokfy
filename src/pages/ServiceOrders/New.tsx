@@ -11,10 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Save } from 'lucide-react';
 import { CustomerSearch } from '@/components/CustomerSearch';
 import { toast } from 'sonner';
+import { useBusinessLabels } from '@/hooks/useBusinessLabels';
 
 export default function NewServiceOrder() {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const { labels } = useBusinessLabels();
   const [saving, setSaving] = useState(false);
   const [techs, setTechs] = useState<{ id: string; full_name: string | null; role: string }[]>([]);
 
@@ -54,8 +56,8 @@ export default function NewServiceOrder() {
 
   async function submit() {
     if (!form.customer_name.trim()) { toast.error('Informe o cliente'); return; }
-    if (!form.device.trim()) { toast.error('Informe o aparelho'); return; }
-    if (!form.reported_issue.trim()) { toast.error('Informe o defeito'); return; }
+    if (!form.device.trim()) { toast.error(`Informe o ${labels.equipment.toLowerCase()}`); return; }
+    if (!form.reported_issue.trim()) { toast.error(`Informe ${labels.defect.toLowerCase()}`); return; }
     setSaving(true);
     try {
       const { service_description, service_value, ...rest } = form;
@@ -84,7 +86,7 @@ export default function NewServiceOrder() {
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate('/os')}><ArrowLeft className="h-4 w-4 mr-1" />Voltar</Button>
-        <h1 className="text-2xl font-bold">Nova Ordem de Serviço</h1>
+        <h1 className="text-2xl font-bold">Nova {labels.work_order}</h1>
       </div>
 
       <Card className="p-6 space-y-4">
@@ -108,21 +110,25 @@ export default function NewServiceOrder() {
       </Card>
 
       <Card className="p-6 space-y-4">
-        <h2 className="font-semibold">Aparelho</h2>
+        <h2 className="font-semibold">{labels.os_title}</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Aparelho *"><Input value={form.device} onChange={e => update('device', e.target.value)} placeholder="Smartphone, Notebook..." /></Field>
+          <Field label={`${labels.equipment} *`}><Input value={form.device} onChange={e => update('device', e.target.value)} placeholder={labels.equipment} /></Field>
           <Field label="Marca"><Input value={form.brand} onChange={e => update('brand', e.target.value)} /></Field>
           <Field label="Modelo"><Input value={form.model} onChange={e => update('model', e.target.value)} /></Field>
-          <Field label="IMEI / Serial"><Input value={form.imei_serial} onChange={e => update('imei_serial', e.target.value)} /></Field>
-          <Field label="Senha do aparelho"><Input value={form.device_password} onChange={e => update('device_password', e.target.value)} /></Field>
-          <Field label="Acessórios deixados"><Input value={form.accessories} onChange={e => update('accessories', e.target.value)} placeholder="Capa, carregador..." /></Field>
+          {labels.show_imei && (
+            <Field label="IMEI / Serial"><Input value={form.imei_serial} onChange={e => update('imei_serial', e.target.value)} /></Field>
+          )}
+          {labels.show_imei && (
+            <Field label={`Senha do ${labels.equipment.toLowerCase()}`}><Input value={form.device_password} onChange={e => update('device_password', e.target.value)} /></Field>
+          )}
+          <Field label="Acessórios / Itens inclusos"><Input value={form.accessories} onChange={e => update('accessories', e.target.value)} placeholder="Itens inclusos..." /></Field>
         </div>
-        <Field label="Estado do aparelho"><Textarea rows={2} value={form.device_condition} onChange={e => update('device_condition', e.target.value)} placeholder="Tela trincada, riscos, etc" /></Field>
+        <Field label={`Estado do ${labels.equipment.toLowerCase()}`}><Textarea rows={2} value={form.device_condition} onChange={e => update('device_condition', e.target.value)} placeholder="Descreva as condições do item..." /></Field>
       </Card>
 
       <Card className="p-6 space-y-4">
-        <h2 className="font-semibold">Diagnóstico inicial</h2>
-        <Field label="Defeito relatado *"><Textarea rows={3} value={form.reported_issue} onChange={e => update('reported_issue', e.target.value)} /></Field>
+        <h2 className="font-semibold">Solicitação</h2>
+        <Field label={`${labels.defect} *`}><Textarea rows={3} value={form.reported_issue} onChange={e => update('reported_issue', e.target.value)} /></Field>
         <Field label="Observações internas"><Textarea rows={2} value={form.internal_notes} onChange={e => update('internal_notes', e.target.value)} /></Field>
       </Card>
 
@@ -153,7 +159,7 @@ export default function NewServiceOrder() {
       <Card className="p-6 space-y-4">
         <h2 className="font-semibold">Atendimento</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Técnico responsável">
+          <Field label={`${labels.responsible} responsável`}>
             <Select value={form.technician_profile_id} onValueChange={v => update('technician_profile_id', v)}>
               <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
               <SelectContent>
