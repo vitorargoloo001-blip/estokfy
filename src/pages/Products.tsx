@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { supabase } from '@/integrations/supabase/client';
+import { validateUserProfile } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -211,6 +212,13 @@ export default function Products() {
       return;
     }
     if (!validate()) return;
+
+    try {
+      await validateUserProfile();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro de autenticação. Faça login novamente.');
+      return;
+    }
 
     setSaving(true);
     try {
