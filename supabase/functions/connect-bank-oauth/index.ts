@@ -10,7 +10,7 @@ const PLUGGY_CLIENT_ID = Deno.env.get("PLUGGY_CLIENT_ID");
 const PLUGGY_CLIENT_SECRET = Deno.env.get("PLUGGY_CLIENT_SECRET");
 const PLUGGY_API_BASE = "https://api.pluggy.ai";
 const REDIRECT_URI = Deno.env.get("PLUGGY_REDIRECT_URI") ||
-  "https://estokfy-dibacell.netlify.app/connect/bank/callback";
+  "https://estokfy.pages.dev/connect/bank/callback";
 
 interface OAuthRequest {
   action: "get_auth_url" | "get_token";
