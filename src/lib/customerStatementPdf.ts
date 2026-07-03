@@ -3,6 +3,12 @@ import { jsPDF } from 'jspdf';
 const fmt = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+export interface StatementItem {
+  name: string;
+  qty: number;
+  unit_price: number;
+}
+
 export interface StatementSale {
   id: string;
   created_at: string;
@@ -11,8 +17,8 @@ export interface StatementSale {
   amount_paid: number;
   amount_pending: number;
   payment_status: string;
-  description: string;
   overdue: boolean;
+  items: StatementItem[];
 }
 
 export interface StatementPayload {
@@ -22,129 +28,181 @@ export interface StatementPayload {
   onlyOverdue: boolean;
 }
 
+const PAGE_H = 297;
+const MARGIN = 14;
+const W = 210;
+const MAX_Y = PAGE_H - 18;
+
+const C_DESC  = MARGIN + 4;
+const C_QTY   = 116;
+const C_UNIT  = 148;
+const C_LINE  = 178;
+const C_RIGHT = W - MARGIN;
+
 export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const W = 210;
   const today = new Date();
   const emissionDate = today.toLocaleDateString('pt-BR');
   let y = 14;
 
-  // Header / brand bar
+  const newPage = () => { doc.addPage(); y = 20; };
+  const checkY = (needed: number) => { if (y + needed > MAX_Y) newPage(); };
+
+  // Brand bar
   doc.setFillColor(59, 130, 246);
   doc.rect(0, 0, W, 4, 'F');
 
   y = 14;
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text(p.store?.name || 'Estokfy', 14, y);
+  doc.text(p.store?.name || 'Estokfy', MARGIN, y);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  if (p.store?.address) { y += 5; doc.text(p.store.address, 14, y); }
-  if (p.store?.phone) { y += 4; doc.text(`Tel: ${p.store.phone}`, 14, y); }
+  if (p.store?.address) { y += 5; doc.text(p.store.address, MARGIN, y); }
+  if (p.store?.phone)   { y += 4; doc.text(`Tel: ${p.store.phone}`, MARGIN, y); }
 
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('EXTRATO DE DÉBITOS', W - 14, 16, { align: 'right' });
+  doc.text('EXTRATO DE DÉBITOS', C_RIGHT, 16, { align: 'right' });
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Emissão: ${emissionDate}`, W - 14, 22, { align: 'right' });
-  if (p.onlyOverdue) doc.text('Filtro: Apenas vencidas', W - 14, 27, { align: 'right' });
+  doc.text(`Emissão: ${emissionDate}`, C_RIGHT, 22, { align: 'right' });
+  if (p.onlyOverdue) doc.text('Filtro: Apenas vencidas', C_RIGHT, 27, { align: 'right' });
 
   y = 38;
-  doc.setDrawColor(220); doc.line(14, y, W - 14, y); y += 6;
+  doc.setDrawColor(220); doc.line(MARGIN, y, C_RIGHT, y); y += 6;
 
   const totalPending = p.sales.reduce((s, r) => s + Number(r.amount_pending), 0);
 
   // Customer block
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.text('CLIENTE', 14, y); y += 5;
+  doc.text('CLIENTE', MARGIN, y); y += 5;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  doc.text(p.customer.name, 14, y); y += 4;
-  if (p.customer.phone) { doc.text(`Telefone: ${p.customer.phone}`, 14, y); y += 4; }
-  doc.text(`Títulos pendentes: ${p.sales.length}`, 14, y); y += 4;
+  doc.text(p.customer.name, MARGIN, y); y += 4;
+  if (p.customer.phone) { doc.text(`Telefone: ${p.customer.phone}`, MARGIN, y); y += 4; }
+  doc.text(`Pendências: ${p.sales.length} venda(s)`, MARGIN, y); y += 4;
 
-  // Total badge right side
   doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text('TOTAL EM ABERTO', W - 14, y - 12, { align: 'right' });
+  doc.text('TOTAL EM ABERTO', C_RIGHT, y - 12, { align: 'right' });
   doc.setFontSize(16);
   doc.setTextColor(220, 38, 38);
-  doc.text(fmt(totalPending), W - 14, y - 5, { align: 'right' });
+  doc.text(fmt(totalPending), C_RIGHT, y - 5, { align: 'right' });
   doc.setTextColor(0);
 
   y += 4;
-  doc.setDrawColor(220); doc.line(14, y, W - 14, y); y += 6;
+  doc.setDrawColor(200); doc.line(MARGIN, y, C_RIGHT, y); y += 5;
 
-  // Table header
+  // Column headers
   doc.setFillColor(245, 247, 250);
-  doc.rect(14, y - 4, W - 28, 7, 'F');
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
-  doc.text('Data', 16, y);
-  doc.text('Produto', 38, y);
-  doc.text('Vencim.', 104, y);
-  doc.text('Total', 130, y, { align: 'right' });
-  doc.text('Recebido', 152, y, { align: 'right' });
-  doc.text('Pendente', 178, y, { align: 'right' });
-  doc.text('Status', W - 16, y, { align: 'right' });
-  y += 5;
-  doc.setDrawColor(230); doc.line(14, y - 1, W - 14, y - 1);
-
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-  p.sales.forEach((s) => {
-    if (y > 265) {
-      doc.addPage(); y = 20;
-    }
-    const date = new Date(s.created_at).toLocaleDateString('pt-BR');
-    const due = s.due_date ? new Date(s.due_date + 'T00:00:00').toLocaleDateString('pt-BR') : '—';
-    const status = s.overdue ? 'Vencida' : s.payment_status === 'partial' ? 'Parcial' : 'Pendente';
-    const desc = (s.description || 'Venda').slice(0, 40);
-
-    doc.text(date, 16, y);
-    doc.text(desc, 38, y);
-    doc.text(due, 104, y);
-    doc.text(fmt(s.net_total), 130, y, { align: 'right' });
-    doc.text(fmt(s.amount_paid), 152, y, { align: 'right' });
-    doc.setFont('helvetica', 'bold');
-    doc.text(fmt(s.amount_pending), 178, y, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    if (s.overdue) doc.setTextColor(220, 38, 38);
-    doc.text(status, W - 16, y, { align: 'right' });
-    doc.setTextColor(0);
-    y += 5;
-  });
-
-  y += 2;
-  doc.setDrawColor(200); doc.line(14, y, W - 14, y); y += 7;
-
-  // Summary
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.text('Total em aberto:', 130, y, { align: 'right' });
-  doc.setTextColor(220, 38, 38);
-  doc.text(fmt(totalPending), W - 14, y, { align: 'right' });
+  doc.rect(MARGIN, y - 3, W - MARGIN * 2, 7, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5);
+  doc.setTextColor(80);
+  doc.text('PRODUTO', C_DESC, y);
+  doc.text('QTD', C_QTY, y, { align: 'right' });
+  doc.text('UNIT.', C_UNIT, y, { align: 'right' });
+  doc.text('SUBTOTAL', C_LINE, y, { align: 'right' });
   doc.setTextColor(0);
   y += 5;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  doc.text('Quantidade de títulos:', 130, y, { align: 'right' });
-  doc.text(String(p.sales.length), W - 14, y, { align: 'right' });
-  y += 10;
+  doc.setDrawColor(220); doc.line(MARGIN, y - 1, C_RIGHT, y - 1);
 
-  // Observation
+  // Sales (newest first)
+  const sortedSales = [...p.sales].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+
+  for (const s of sortedSales) {
+    const date   = new Date(s.created_at).toLocaleDateString('pt-BR');
+    const due    = s.due_date ? new Date(s.due_date + 'T00:00:00').toLocaleDateString('pt-BR') : '—';
+    const status = s.overdue ? 'VENCIDA' : s.payment_status === 'partial' ? 'PARCIAL' : 'PENDENTE';
+    const items  = s.items || [];
+
+    checkY(8 + items.length * 5 + 22);
+
+    // Sale header bar
+    doc.setFillColor(237, 242, 250);
+    doc.rect(MARGIN, y - 3, W - MARGIN * 2, 8, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+    doc.setTextColor(30);
+    doc.text(`Venda · ${date}`, C_DESC, y);
+    if (s.overdue) doc.setTextColor(200, 30, 30);
+    doc.text(`Venc: ${due}   ${status}`, C_RIGHT, y, { align: 'right' });
+    doc.setTextColor(0);
+    y += 7;
+
+    // Item rows
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+    for (const it of items) {
+      checkY(6);
+      const name = (doc.splitTextToSize(it.name, 88) as string[])[0];
+      doc.text(name, C_DESC, y);
+      doc.text(String(it.qty), C_QTY, y, { align: 'right' });
+      doc.text(fmt(it.unit_price), C_UNIT, y, { align: 'right' });
+      doc.text(fmt(it.qty * it.unit_price), C_LINE, y, { align: 'right' });
+      y += 5;
+    }
+
+    // Sale summary
+    checkY(16);
+    doc.setFontSize(7.5); doc.setTextColor(80);
+    doc.text('Total da venda:', 102, y, { align: 'right' });
+    doc.setTextColor(0);
+    doc.text(fmt(s.net_total), C_LINE, y, { align: 'right' });
+    y += 4.5;
+
+    if (s.amount_paid > 0) {
+      checkY(6);
+      doc.setTextColor(80);
+      doc.text('Já recebido:', 102, y, { align: 'right' });
+      doc.setTextColor(22, 163, 74);
+      doc.text(fmt(s.amount_paid), C_LINE, y, { align: 'right' });
+      doc.setTextColor(0);
+      y += 4.5;
+    }
+
+    checkY(6);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+    doc.setTextColor(200, 30, 30);
+    doc.text('Pendente:', 102, y, { align: 'right' });
+    doc.text(fmt(s.amount_pending), C_LINE, y, { align: 'right' });
+    doc.setTextColor(0); doc.setFont('helvetica', 'normal');
+    y += 3;
+
+    doc.setDrawColor(220); doc.line(MARGIN, y, C_RIGHT, y);
+    y += 5;
+  }
+
+  // Grand total
+  checkY(20);
+  doc.setDrawColor(180); doc.line(MARGIN, y - 2, C_RIGHT, y - 2);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  doc.text('TOTAL EM ABERTO:', C_RIGHT - 48, y + 5);
+  doc.setTextColor(220, 38, 38);
+  doc.text(fmt(totalPending), C_RIGHT, y + 5, { align: 'right' });
+  doc.setTextColor(0);
+  y += 12;
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+  doc.text(`Quantidade de vendas: ${p.sales.length}`, C_RIGHT, y, { align: 'right' });
+  y += 8;
+
   doc.setFontSize(8); doc.setTextColor(90);
   const obs = 'Este documento apresenta os valores atualmente pendentes em nosso sistema na data de emissão.';
-  const obsLines = doc.splitTextToSize(obs, W - 28);
-  doc.text(obsLines, 14, y);
+  doc.text(doc.splitTextToSize(obs, W - MARGIN * 2), MARGIN, y);
   doc.setTextColor(0);
 
-  // Footer
   doc.setFontSize(7); doc.setTextColor(150);
-  doc.text(`${p.store?.name || 'Estokfy'} — Extrato gerado em ${emissionDate}`, W / 2, 290, { align: 'center' });
+  doc.text(
+    `${p.store?.name || 'Estokfy'} — Extrato gerado em ${emissionDate}`,
+    W / 2, PAGE_H - 8, { align: 'center' },
+  );
 
   return doc;
 }
 
 export function statementFileName(customerName: string): string {
   const safe = customerName
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
   const d = new Date();

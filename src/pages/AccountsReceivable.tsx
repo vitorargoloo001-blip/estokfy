@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 
 interface SaleItemLite {
   qty: number;
+  unit_price: number;
   product_name_snapshot: string | null;
   products: { name: string } | null;
 }
@@ -137,7 +138,7 @@ export default function AccountsReceivable() {
     let q = supabase
       .from('sales')
       .select(
-        'id, created_at, net_total, amount_paid, amount_pending, payment_status, due_date, notes, customer_id, customers(name, phone), sale_items(qty, product_name_snapshot, products(name))',
+        'id, created_at, net_total, amount_paid, amount_pending, payment_status, due_date, notes, customer_id, customers(name, phone), sale_items(qty, unit_price, product_name_snapshot, products(name))',
       )
       .eq('store_id', profile.store_id)
       .is('deleted_at', null)
@@ -695,8 +696,12 @@ export default function AccountsReceivable() {
                 amount_paid: Number(s.amount_paid),
                 amount_pending: Number(s.amount_pending),
                 payment_status: s.payment_status,
-                description: saleItemsSummary(s.sale_items).primary,
                 overdue: !!isOverdue(s),
+                items: (s.sale_items || []).map((it) => ({
+                  name: itemName(it),
+                  qty: it.qty,
+                  unit_price: Number(it.unit_price),
+                })),
               }));
 
               const doc = generateCustomerStatementPDF({
