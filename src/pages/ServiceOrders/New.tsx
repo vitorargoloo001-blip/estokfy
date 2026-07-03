@@ -12,6 +12,7 @@ import { ArrowLeft, Save, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-re
 import { CustomerSearch } from '@/components/CustomerSearch';
 import { toast } from 'sonner';
 import { useBusinessLabels } from '@/hooks/useBusinessLabels';
+import { useExtendedCustomerProfile } from '@/hooks/useExtendedCustomerProfile';
 
 interface EquipmentRow {
   device: string;
@@ -32,6 +33,7 @@ export default function NewServiceOrder() {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const { labels } = useBusinessLabels();
+  const { enabled: extendedProfile } = useExtendedCustomerProfile();
   const [saving, setSaving] = useState(false);
   const [techs, setTechs] = useState<{ id: string; full_name: string | null; role: string }[]>([]);
   const [isPro, setIsPro] = useState(false);
@@ -42,6 +44,13 @@ export default function NewServiceOrder() {
     customer_id: '' as string | null,
     customer_name: '',
     customer_phone: '',
+    customer_doc_id: '',
+    customer_state_registration: '',
+    customer_address: '',
+    customer_neighborhood: '',
+    customer_city: '',
+    customer_state: '',
+    customer_zip_code: '',
     reported_issue: '',
     internal_notes: '',
     priority: 'normal',
@@ -97,6 +106,15 @@ export default function NewServiceOrder() {
         customer_id: form.customer_id || null,
         customer_name: form.customer_name,
         customer_phone: form.customer_phone,
+        ...(extendedProfile ? {
+          customer_doc_id: form.customer_doc_id,
+          customer_state_registration: form.customer_state_registration,
+          customer_address: form.customer_address,
+          customer_neighborhood: form.customer_neighborhood,
+          customer_city: form.customer_city,
+          customer_state: form.customer_state,
+          customer_zip_code: form.customer_zip_code,
+        } : {}),
         device: mainEquip.device,
         brand: mainEquip.brand,
         model: mainEquip.model,
@@ -174,7 +192,22 @@ export default function NewServiceOrder() {
           value={form.customer_id}
           onChange={(id, c) => {
             update('customer_id', id);
-            if (c) { update('customer_name', c.name); update('customer_phone', c.phone || ''); }
+            if (c) {
+              update('customer_name', c.name);
+              update('customer_phone', c.phone || '');
+              if (extendedProfile) {
+                setForm(p => ({
+                  ...p,
+                  customer_doc_id: c.doc_id || '',
+                  customer_state_registration: c.state_registration || '',
+                  customer_address: c.address || '',
+                  customer_neighborhood: c.neighborhood || '',
+                  customer_city: c.city || '',
+                  customer_state: c.state || '',
+                  customer_zip_code: c.zip_code || '',
+                }));
+              }
+            }
           }}
           allowNone={false}
         />
@@ -183,6 +216,24 @@ export default function NewServiceOrder() {
           <Field label="Telefone"><Input value={form.customer_phone} onChange={e => update('customer_phone', e.target.value)} /></Field>
         </div>
       </Card>
+
+      {/* DADOS FISCAIS E ENDEREÇO (MB) */}
+      {extendedProfile && (
+        <Card className="p-6 space-y-4">
+          <h2 className="font-semibold">Dados fiscais e endereço</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="CPF/CNPJ"><Input value={form.customer_doc_id} onChange={e => update('customer_doc_id', e.target.value)} /></Field>
+            <Field label="Inscrição Estadual"><Input value={form.customer_state_registration} onChange={e => update('customer_state_registration', e.target.value)} /></Field>
+          </div>
+          <Field label="Endereço"><Input value={form.customer_address} onChange={e => update('customer_address', e.target.value)} placeholder="Rua, número, complemento" /></Field>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Field label="Bairro"><Input value={form.customer_neighborhood} onChange={e => update('customer_neighborhood', e.target.value)} /></Field>
+            <Field label="Cidade"><Input value={form.customer_city} onChange={e => update('customer_city', e.target.value)} /></Field>
+            <Field label="UF"><Input value={form.customer_state} onChange={e => update('customer_state', e.target.value.toUpperCase().slice(0, 2))} maxLength={2} placeholder="SP" /></Field>
+          </div>
+          <Field label="CEP"><Input value={form.customer_zip_code} onChange={e => update('customer_zip_code', e.target.value)} placeholder="00000-000" className="max-w-[200px]" /></Field>
+        </Card>
+      )}
 
       {/* EQUIPAMENTOS */}
       <Card className="p-6 space-y-4">

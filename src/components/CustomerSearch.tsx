@@ -18,6 +18,12 @@ export interface CustomerLite {
   phone: string | null;
   doc_id?: string | null;
   email?: string | null;
+  state_registration?: string | null;
+  address?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
 }
 
 interface Props {
@@ -73,7 +79,7 @@ export function CustomerSearch({
     (async () => {
       const { data } = await supabase
         .from('customers')
-        .select('id, name, phone, doc_id, email')
+        .select('id, name, phone, doc_id, email, state_registration, address, neighborhood, city, state, zip_code')
         .eq('id', value)
         .maybeSingle();
       if (!cancel && data) setSelected(data as CustomerLite);
@@ -90,7 +96,7 @@ export function CustomerSearch({
       setLoading(true);
       let q = supabase
         .from('customers')
-        .select('id, name, phone, doc_id, email')
+        .select('id, name, phone, doc_id, email, state_registration, address, neighborhood, city, state, zip_code')
         .eq('store_id', storeId)
         .order('name')
         .limit(15);

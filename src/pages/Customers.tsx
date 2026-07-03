@@ -16,25 +16,33 @@ import { maskPhone, validatePhone } from '@/lib/masks';
 import { Skeleton } from '@/components/ui/skeleton';
 import PageHeader from '@/components/PageHeader';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useExtendedCustomerProfile } from '@/hooks/useExtendedCustomerProfile';
 
 interface Customer {
   id: string; name: string; phone: string | null; email: string | null; doc_id: string | null; created_at: string;
+  state_registration: string | null; address: string | null; neighborhood: string | null;
+  city: string | null; state: string | null; zip_code: string | null;
 }
 
 interface FormErrors { [key: string]: string; }
 
 const PAGE_SIZE = 30;
+const blankForm = {
+  name: '', phone: '', email: '', doc_id: '',
+  state_registration: '', address: '', neighborhood: '', city: '', state: '', zip_code: '',
+};
 
 export default function Customers() {
   const { profile } = useAuth();
   const isMobile = useIsMobile();
+  const { enabled: extendedProfile } = useExtendedCustomerProfile();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
-  const [form, setForm] = useState({ name: '', phone: '', email: '', doc_id: '' });
+  const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -63,8 +71,17 @@ export default function Customers() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  const openNew = () => { setEditing(null); setForm({ name: '', phone: '', email: '', doc_id: '' }); setErrors({}); setDialogOpen(true); };
-  const openEdit = (c: Customer) => { setEditing(c); setForm({ name: c.name, phone: c.phone || '', email: c.email || '', doc_id: c.doc_id || '' }); setErrors({}); setDialogOpen(true); };
+  const openNew = () => { setEditing(null); setForm(blankForm); setErrors({}); setDialogOpen(true); };
+  const openEdit = (c: Customer) => {
+    setEditing(c);
+    setForm({
+      name: c.name, phone: c.phone || '', email: c.email || '', doc_id: c.doc_id || '',
+      state_registration: c.state_registration || '', address: c.address || '',
+      neighborhood: c.neighborhood || '', city: c.city || '', state: c.state || '', zip_code: c.zip_code || '',
+    });
+    setErrors({});
+    setDialogOpen(true);
+  };
 
   const handleDelete = async (c: Customer) => {
     if (!confirm(`Excluir o cliente "${c.name}"? Esta ação não pode ser desfeita.`)) return;
@@ -89,6 +106,15 @@ export default function Customers() {
     if (!form.phone.trim()) e.phone = 'Informe o telefone';
     else if (!validatePhone(form.phone)) e.phone = 'Telefone inválido';
     if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = 'E-mail inválido';
+    if (extendedProfile) {
+      if (!form.doc_id.trim()) e.doc_id = 'Informe o CPF/CNPJ';
+      if (!form.state_registration.trim()) e.state_registration = 'Informe a Inscrição Estadual';
+      if (!form.address.trim()) e.address = 'Informe o endereço';
+      if (!form.neighborhood.trim()) e.neighborhood = 'Informe o bairro';
+      if (!form.city.trim()) e.city = 'Informe a cidade';
+      if (!form.state.trim()) e.state = 'Informe o estado (UF)';
+      if (!form.zip_code.trim()) e.zip_code = 'Informe o CEP';
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -117,6 +143,12 @@ export default function Customers() {
         store_id: storeId, name: form.name.trim(),
         phone: form.phone.trim() || null, email: form.email.trim() || null,
         doc_id: form.doc_id.trim() || null,
+        state_registration: form.state_registration.trim() || null,
+        address: form.address.trim() || null,
+        neighborhood: form.neighborhood.trim() || null,
+        city: form.city.trim() || null,
+        state: form.state.trim() || null,
+        zip_code: form.zip_code.trim() || null,
       };
 
       if (editing) {
@@ -239,7 +271,7 @@ export default function Customers() {
           <DialogHeader><DialogTitle>{editing ? 'Editar Cliente' : 'Novo Cliente'}</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="space-y-1">
-              <Label>Nome *</Label>
+              <Label>{extendedProfile ? 'Razão Social / Nome *' : 'Nome *'}</Label>
               <Input value={form.name} onChange={e => { setForm({ ...form, name: e.target.value }); setErrors(prev => ({ ...prev, name: '' })); }} className={`h-11 ${errors.name ? 'border-destructive' : ''}`} placeholder="Nome completo" />
               <FieldError field="name" />
             </div>
@@ -255,7 +287,54 @@ export default function Customers() {
                 <FieldError field="email" />
               </div>
             </div>
-            <div className="space-y-1"><Label>CPF/CNPJ</Label><Input value={form.doc_id} onChange={e => setForm({ ...form, doc_id: e.target.value })} className="h-11" /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>CPF/CNPJ{extendedProfile ? ' *' : ''}</Label>
+                <Input value={form.doc_id} onChange={e => { setForm({ ...form, doc_id: e.target.value }); setErrors(prev => ({ ...prev, doc_id: '' })); }} className={`h-11 ${errors.doc_id ? 'border-destructive' : ''}`} />
+                <FieldError field="doc_id" />
+              </div>
+              {extendedProfile && (
+                <div className="space-y-1">
+                  <Label>Inscrição Estadual *</Label>
+                  <Input value={form.state_registration} onChange={e => { setForm({ ...form, state_registration: e.target.value }); setErrors(prev => ({ ...prev, state_registration: '' })); }} className={`h-11 ${errors.state_registration ? 'border-destructive' : ''}`} />
+                  <FieldError field="state_registration" />
+                </div>
+              )}
+            </div>
+
+            {extendedProfile && (
+              <>
+                <div className="space-y-1">
+                  <Label>Endereço *</Label>
+                  <Input value={form.address} onChange={e => { setForm({ ...form, address: e.target.value }); setErrors(prev => ({ ...prev, address: '' })); }} className={`h-11 ${errors.address ? 'border-destructive' : ''}`} placeholder="Rua, número, complemento" />
+                  <FieldError field="address" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label>Bairro *</Label>
+                    <Input value={form.neighborhood} onChange={e => { setForm({ ...form, neighborhood: e.target.value }); setErrors(prev => ({ ...prev, neighborhood: '' })); }} className={`h-11 ${errors.neighborhood ? 'border-destructive' : ''}`} />
+                    <FieldError field="neighborhood" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>CEP *</Label>
+                    <Input value={form.zip_code} onChange={e => { setForm({ ...form, zip_code: e.target.value }); setErrors(prev => ({ ...prev, zip_code: '' })); }} className={`h-11 ${errors.zip_code ? 'border-destructive' : ''}`} placeholder="00000-000" />
+                    <FieldError field="zip_code" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label>Cidade *</Label>
+                    <Input value={form.city} onChange={e => { setForm({ ...form, city: e.target.value }); setErrors(prev => ({ ...prev, city: '' })); }} className={`h-11 ${errors.city ? 'border-destructive' : ''}`} />
+                    <FieldError field="city" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Estado (UF) *</Label>
+                    <Input value={form.state} onChange={e => { setForm({ ...form, state: e.target.value.toUpperCase().slice(0, 2) }); setErrors(prev => ({ ...prev, state: '' })); }} className={`h-11 ${errors.state ? 'border-destructive' : ''}`} maxLength={2} placeholder="SP" />
+                    <FieldError field="state" />
+                  </div>
+                </div>
+              </>
+            )}
             <Button onClick={handleSave} className="w-full h-11" disabled={saving}>
               {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Salvando...</> : editing ? 'Salvar' : 'Cadastrar'}
             </Button>

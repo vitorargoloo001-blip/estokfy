@@ -17,6 +17,13 @@ interface SOPdfPayload {
     os_number: number;
     customer_name: string;
     customer_phone?: string | null;
+    customer_doc_id?: string | null;
+    customer_state_registration?: string | null;
+    customer_address?: string | null;
+    customer_neighborhood?: string | null;
+    customer_city?: string | null;
+    customer_state?: string | null;
+    customer_zip_code?: string | null;
     device: string;
     brand?: string | null;
     model?: string | null;
@@ -119,9 +126,26 @@ export function generateServiceOrderPDF(p: SOPdfPayload): jsPDF {
   y = 36;
 
   // ── CLIENTE ─────────────────────────────────────────────
+  const hasExtendedCustomerData = !!(
+    p.os.customer_doc_id || p.os.customer_state_registration || p.os.customer_address ||
+    p.os.customer_neighborhood || p.os.customer_city || p.os.customer_state || p.os.customer_zip_code
+  );
+
   y = sectionTitle(doc, 'Dados do cliente', y);
-  y = infoRow(doc, 'Nome', p.os.customer_name, y);
-  if (p.os.customer_phone) y = infoRow(doc, 'Telefone', p.os.customer_phone, y);
+  if (hasExtendedCustomerData) {
+    y = infoRow(doc, 'Cliente', p.os.customer_name, y);
+    if (p.os.customer_address) y = infoRow(doc, 'Endereço', p.os.customer_address, y);
+    if (p.os.customer_neighborhood) y = infoRow(doc, 'Bairro', p.os.customer_neighborhood, y);
+    if (p.os.customer_city) y = infoRow(doc, 'Cidade', p.os.customer_city, y);
+    if (p.os.customer_state) y = infoRow(doc, 'UF', p.os.customer_state, y);
+    if (p.os.customer_zip_code) y = infoRow(doc, 'CEP', p.os.customer_zip_code, y);
+    if (p.os.customer_phone) y = infoRow(doc, 'Telefone', p.os.customer_phone, y);
+    if (p.os.customer_state_registration) y = infoRow(doc, 'Inscrição Estadual', p.os.customer_state_registration, y);
+    if (p.os.customer_doc_id) y = infoRow(doc, 'CPF/CNPJ', p.os.customer_doc_id, y);
+  } else {
+    y = infoRow(doc, 'Nome', p.os.customer_name, y);
+    if (p.os.customer_phone) y = infoRow(doc, 'Telefone', p.os.customer_phone, y);
+  }
   y += 3;
 
   // ── EQUIPAMENTOS ─────────────────────────────────────────
