@@ -17,6 +17,10 @@ dist-ssr
 _migracao/
 supabase/.temp/
 
+# Local scratch files (bank statement fixtures, SQL editor exports — never commit)
+Extrato_*.pdf
+Supabase Snippet*.csv
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
