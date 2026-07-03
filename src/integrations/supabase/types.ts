@@ -6181,6 +6181,7 @@ export type Database = {
           total_count: number
         }[]
       }
+      get_seller_dashboard: { Args: never; Returns: Json }
       get_store_by_owner_email: { Args: { p_email: string }; Returns: string }
       get_store_financial_summary: {
         Args: { p_store_id: string }

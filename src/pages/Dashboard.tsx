@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 import { startOfTodayUTCISO, startOfMonthUTCISO, daysAgoStrBR, isoToDayBR, formatDayMonthBR } from '@/lib/dateBR';
 import SmartRecommendations from '@/components/SmartRecommendations';
 import TeamPerformanceCard from '@/components/TeamPerformanceCard';
+import SellerDashboard from '@/components/SellerDashboard';
+import { usePermissions } from '@/hooks/usePermissions';
 
 // Recharts (~225KB) só é baixado quando o Dashboard renderiza
 const DailySalesBar = lazy(() => import('@/components/charts/DashboardCharts').then(m => ({ default: m.DailySalesBar })));
@@ -42,6 +44,7 @@ interface PendingDelivery {
 export default function Dashboard() {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const { canViewFinancials, loading: permissionsLoading } = usePermissions();
   const [kpis, setKpis] = useState<KPIs>({ totalProducts: 0, lowStock: 0, todaySales: 0, todayRevenue: 0, todayPending: 0, monthRevenue: 0, monthProfit: 0, overdueCount: 0, overdueAmount: 0, payableOverdueCount: 0, payableOverdueAmount: 0 });
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const [dailySales, setDailySales] = useState<{ day: string; total: number }[]>([]);
@@ -50,7 +53,9 @@ export default function Dashboard() {
   const [pendingDeliveries, setPendingDeliveries] = useState<PendingDelivery[]>([]);
 
   useEffect(() => {
-    if (!profile) return;
+    // Cargos sem visão financeira (vendedor, estoque, viewer) nunca disparam
+    // essas consultas — os dados nem chegam ao navegador, não é só ocultado na tela.
+    if (!profile || permissionsLoading || !canViewFinancials) return;
     const storeId = profile.store_id;
 
     const fetchAll = async () => {
@@ -150,7 +155,7 @@ export default function Dashboard() {
       }
     };
     fetchAll();
-  }, [profile]);
+  }, [profile, permissionsLoading, canViewFinancials]);
 
   const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const METHOD_MAP: Record<string, string> = { pickup: 'Retirada', correios: 'Correios', '99': '99', motoboy: 'Motoboy' };
@@ -158,6 +163,9 @@ export default function Dashboard() {
     pending: { label: 'Pendente', variant: 'secondary' },
     shipped: { label: 'Enviado', variant: 'default' },
   };
+
+  if (permissionsLoading) return null;
+  if (!canViewFinancials) return <SellerDashboard />;
 
   const quickActions = [
     { icon: ShoppingCart, label: 'Vender', to: '/vendas/nova', color: 'bg-primary text-primary-foreground' },

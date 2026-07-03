@@ -25,5 +25,6 @@ export function usePermissions() {
     canViewAdvancedReports:  caps.canViewAdvancedReports,
     canSystemSettings:       caps.canSystemSettings,
     canViewFinancials:       caps.canViewFinancials,
+    loading:                 caps.loading,
   };
 }
