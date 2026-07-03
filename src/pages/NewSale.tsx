@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
-import { invokeEdgeFunction } from '@/lib/api';
+import { invokeEdgeFunction, validateUserProfile } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -248,6 +248,15 @@ export default function NewSale() {
     if (!session?.access_token || !user) { toast.error('Sessão expirada. Faça login novamente.'); navigate('/login'); return; }
     if (!profile) { toast.error('Perfil não carregado.'); return; }
     if (!storeId) { toast.error('Loja não identificada.'); return; }
+
+    try {
+      await validateUserProfile();
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro de autenticação. Faça login novamente.');
+      navigate('/login');
+      return;
+    }
+
     if (items.length === 0) { toast.error('Adicione pelo menos um produto'); return; }
     if (!Number.isFinite(discount) || discount < 0) { toast.error('Desconto inválido'); return; }
     if (!Number.isFinite(shippingFee) || shippingFee < 0) { toast.error('Frete inválido'); return; }

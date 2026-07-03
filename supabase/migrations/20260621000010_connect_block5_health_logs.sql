@@ -1,55 +1,45 @@
--- =====================================================================
--- Connect Block 5 — Saúde da conexão + logs de sistema
--- =====================================================================
-
--- ── 1. Tabela connect_system_logs ────────────────────────────────────
+-- Block 5: Connection health monitoring — connect_system_logs table + log/query RPCs
+-- Backfilled 2026-07-01: this migration was applied directly in production via the SQL
+-- Editor on 2026-06-21 but never committed to git. Reconstructed from the live schema
+-- (pg_get_functiondef / information_schema) to close the code/production gap found during
+-- the Connect production audit. Idempotent (CREATE ... IF NOT EXISTS / OR REPLACE), safe
+-- to run against a database that already has these objects.
 
 CREATE TABLE IF NOT EXISTS public.connect_system_logs (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  store_id            UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
-  log_type            TEXT NOT NULL CHECK (log_type IN (
-                        'sync', 'webhook', 'error', 'reconnect',
-                        'token_expired', 'info', 'match'
-                      )),
-  message             TEXT NOT NULL,
-  details             JSONB DEFAULT '{}',
-  bank_connection_id  UUID REFERENCES public.bank_connections(id) ON DELETE SET NULL,
-  pluggy_item_id      UUID REFERENCES public.pluggy_items(id) ON DELETE SET NULL,
-  severity            TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'warning', 'error')),
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  store_id uuid NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+  log_type text NOT NULL CHECK (log_type = ANY (ARRAY['sync'::text, 'webhook'::text, 'error'::text, 'reconnect'::text, 'token_expired'::text, 'info'::text, 'match'::text])),
+  message text NOT NULL,
+  details jsonb DEFAULT '{}'::jsonb,
+  bank_connection_id uuid REFERENCES public.bank_connections(id) ON DELETE SET NULL,
+  pluggy_item_id uuid REFERENCES public.pluggy_items(id) ON DELETE SET NULL,
+  severity text NOT NULL DEFAULT 'info'::text CHECK (severity = ANY (ARRAY['info'::text, 'warning'::text, 'error'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_connect_system_logs_store ON public.connect_system_logs USING btree (store_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_connect_system_logs_type ON public.connect_system_logs USING btree (store_id, log_type, created_at DESC);
 
 ALTER TABLE public.connect_system_logs ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY connect_system_logs_store ON public.connect_system_logs
-  FOR ALL USING (
-    store_id IN (
-      SELECT store_id FROM public.profiles WHERE auth_user_id = auth.uid()
-    )
-  );
-
-CREATE INDEX IF NOT EXISTS idx_connect_system_logs_store
-  ON public.connect_system_logs(store_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_connect_system_logs_type
-  ON public.connect_system_logs(store_id, log_type, created_at DESC);
-
--- ── 2. RPC: add_connect_log (service_role + authenticated) ───────────
+DROP POLICY IF EXISTS connect_system_logs_store ON public.connect_system_logs;
+CREATE POLICY connect_system_logs_store ON public.connect_system_logs FOR ALL
+  USING (store_id IN (SELECT profiles.store_id FROM public.profiles WHERE profiles.auth_user_id = auth.uid()));
 
 CREATE OR REPLACE FUNCTION public.add_connect_log(
-  p_store_id            UUID,
-  p_log_type            TEXT,
-  p_message             TEXT,
-  p_details             JSONB     DEFAULT '{}',
-  p_bank_connection_id  UUID      DEFAULT NULL,
-  p_pluggy_item_id      UUID      DEFAULT NULL,
-  p_severity            TEXT      DEFAULT 'info'
+  p_store_id uuid,
+  p_log_type text,
+  p_message text,
+  p_details jsonb DEFAULT '{}'::jsonb,
+  p_bank_connection_id uuid DEFAULT NULL::uuid,
+  p_pluggy_item_id uuid DEFAULT NULL::uuid,
+  p_severity text DEFAULT 'info'::text
 )
-RETURNS UUID
+RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
-AS $$
+SET search_path TO 'public'
+AS $function$
 DECLARE
   v_id UUID;
 BEGIN
@@ -63,38 +53,22 @@ BEGIN
   RETURNING id INTO v_id;
   RETURN v_id;
 END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.add_connect_log(UUID, TEXT, TEXT, JSONB, UUID, UUID, TEXT)
-  TO authenticated, service_role;
-
--- ── 3. RPC: get_connect_logs ──────────────────────────────────────────
+$function$;
 
 CREATE OR REPLACE FUNCTION public.get_connect_logs(
-  p_store_id    UUID,
-  p_log_type    TEXT    DEFAULT NULL,
-  p_severity    TEXT    DEFAULT NULL,
-  p_start_date  DATE    DEFAULT NULL,
-  p_end_date    DATE    DEFAULT NULL,
-  p_limit       INTEGER DEFAULT 100,
-  p_offset      INTEGER DEFAULT 0
+  p_store_id uuid,
+  p_log_type text DEFAULT NULL::text,
+  p_severity text DEFAULT NULL::text,
+  p_start_date date DEFAULT NULL::date,
+  p_end_date date DEFAULT NULL::date,
+  p_limit integer DEFAULT 100,
+  p_offset integer DEFAULT 0
 )
-RETURNS TABLE(
-  id                  UUID,
-  log_type            TEXT,
-  message             TEXT,
-  details             JSONB,
-  severity            TEXT,
-  bank_connection_id  UUID,
-  bank_name           TEXT,
-  pluggy_item_id      UUID,
-  institution_name    TEXT,
-  created_at          TIMESTAMPTZ
-)
+RETURNS TABLE(id uuid, log_type text, message text, details jsonb, severity text, bank_connection_id uuid, bank_name text, pluggy_item_id uuid, institution_name text, created_at timestamp with time zone)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
-AS $$
+SET search_path TO 'public'
+AS $function$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles
@@ -126,43 +100,14 @@ BEGIN
   ORDER BY l.created_at DESC
   LIMIT p_limit OFFSET p_offset;
 END;
-$$;
+$function$;
 
-GRANT EXECUTE ON FUNCTION public.get_connect_logs(UUID, TEXT, TEXT, DATE, DATE, INTEGER, INTEGER)
-  TO authenticated;
-
--- ── 4. RPC: get_connection_health ─────────────────────────────────────
--- Retorna saúde detalhada de cada banco conectado
-
-CREATE OR REPLACE FUNCTION public.get_connection_health(
-  p_store_id UUID
-)
-RETURNS TABLE(
-  bank_connection_id    UUID,
-  bank_name             TEXT,
-  institution_name      TEXT,
-  account_number        TEXT,
-  account_type          TEXT,
-  connection_status     TEXT,
-  pluggy_status         TEXT,
-  last_synced_at        TIMESTAMPTZ,
-  last_webhook_at       TIMESTAMPTZ,
-  last_webhook_event    TEXT,
-  total_transactions    BIGINT,
-  pending_matches       BIGINT,
-  divergent_count       BIGINT,
-  error_code            TEXT,
-  error_message         TEXT,
-  has_token_error       BOOLEAN,
-  has_sync_error        BOOLEAN,
-  has_webhook_stale     BOOLEAN,
-  days_since_sync       INTEGER,
-  days_since_webhook    INTEGER
-)
+CREATE OR REPLACE FUNCTION public.get_connection_health(p_store_id uuid)
+RETURNS TABLE(bank_connection_id uuid, bank_name text, institution_name text, account_number text, account_type text, connection_status text, pluggy_status text, last_synced_at timestamp with time zone, last_webhook_at timestamp with time zone, last_webhook_event text, total_transactions bigint, pending_matches bigint, divergent_count bigint, error_code text, error_message text, has_token_error boolean, has_sync_error boolean, has_webhook_stale boolean, days_since_sync integer, days_since_webhook integer)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
-AS $$
+SET search_path TO 'public'
+AS $function$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles
@@ -173,7 +118,7 @@ BEGIN
 
   RETURN QUERY
   SELECT
-    bc.id                            AS bank_connection_id,
+    bc.id                             AS bank_connection_id,
     bc.bank_name,
     pi2.institution_name,
     bc.account_number,
@@ -181,7 +126,6 @@ BEGIN
     bc.status                        AS connection_status,
     pi2.status                       AS pluggy_status,
     pi2.last_synced_at,
-    -- último webhook recebido para este item
     (SELECT pw.received_at
      FROM public.pluggy_webhooks pw
      WHERE pw.pluggy_item_id = pi2.pluggy_item_id::TEXT
@@ -192,7 +136,6 @@ BEGIN
      WHERE pw.pluggy_item_id = pi2.pluggy_item_id::TEXT
      ORDER BY pw.received_at DESC LIMIT 1
     )                                AS last_webhook_event,
-    -- totais
     (SELECT COUNT(*) FROM public.bank_transactions bt
      WHERE bt.store_id = p_store_id AND bt.bank_connection_id = bc.id)::BIGINT AS total_transactions,
     (SELECT COUNT(*) FROM public.reconciliation_matches rm
@@ -204,10 +147,8 @@ BEGIN
        AND bt.status = 'divergent')::BIGINT AS divergent_count,
     pi2.error_code,
     pi2.error_message,
-    -- flags de alertas
     (pi2.status IN ('login_error', 'outdated') OR bc.status = 'error') AS has_token_error,
     (bc.last_sync_status = 'failed' OR pi2.status = 'error')           AS has_sync_error,
-    -- webhook considerado "estagnado" se > 48h sem receber
     (
       (SELECT pw.received_at
        FROM public.pluggy_webhooks pw
@@ -233,46 +174,4 @@ BEGIN
     AND bc.is_active = true
   ORDER BY bc.bank_name;
 END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.get_connection_health(UUID) TO authenticated;
-
--- ── 5. RPC: get_system_log_summary (contadores por tipo) ──────────────
-
-CREATE OR REPLACE FUNCTION public.get_system_log_summary(
-  p_store_id  UUID,
-  p_days      INTEGER DEFAULT 7
-)
-RETURNS TABLE(
-  log_type   TEXT,
-  severity   TEXT,
-  count      BIGINT,
-  last_at    TIMESTAMPTZ
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE auth_user_id = auth.uid() AND store_id = p_store_id
-  ) THEN
-    RAISE EXCEPTION 'Acesso negado';
-  END IF;
-
-  RETURN QUERY
-  SELECT
-    l.log_type,
-    l.severity,
-    COUNT(*)::BIGINT AS count,
-    MAX(l.created_at) AS last_at
-  FROM public.connect_system_logs l
-  WHERE l.store_id = p_store_id
-    AND l.created_at >= NOW() - (p_days || ' days')::INTERVAL
-  GROUP BY l.log_type, l.severity
-  ORDER BY l.log_type, l.severity;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.get_system_log_summary(UUID, INTEGER) TO authenticated;
+$function$;

@@ -57,7 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [storeModules, setStoreModules] = useState<StoreModules>(null);
-  const [modulesLoading, setModulesLoading] = useState(false);
+  // Starts true: RequireConnectModule treats modulesLoading=false as "checked, no access" —
+  // must stay true until the first load attempt resolves, or a cold boot / hard refresh
+  // on a /connect/* route redirects away before get_store_modules ever runs.
+  const [modulesLoading, setModulesLoading] = useState(true);
   const [moduleFailureCount, setModuleFailureCount] = useState(0);
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
@@ -209,6 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setProfile(null);
           setStoreModules(null);
+          setModulesLoading(false);
           setCapabilities({});
           setNeedsOnboarding(false);
           setShowGuide(false);
@@ -222,6 +226,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
       if (session?.user) {
         handleUser(session.user);
+      } else {
+        setModulesLoading(false);
       }
       setLoading(false);
     });

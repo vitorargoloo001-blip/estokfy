@@ -103,6 +103,27 @@ async function getToken(): Promise<string> {
   return token;
 }
 
+async function validateUserProfile(): Promise<void> {
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) throw new Error('missing_token');
+
+    const { data: profile, error: pErr } = await supabase
+      .from('profiles')
+      .select('id, is_active')
+      .eq('auth_user_id', user.id)
+      .maybeSingle();
+
+    if (pErr || !profile) throw new Error('perfil_nao_encontrado');
+    if (!profile.is_active) throw new Error('usuario_inativo');
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('perfil')) throw new Error('Perfil não encontrado. Faça login novamente.');
+    if (msg.includes('inativo')) throw new Error('Usuário inativo. Contate o administrador.');
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+}
+
 function isNetworkError(err: unknown): boolean {
   if (err instanceof DOMException && err.name === 'AbortError') return false; // timeout
   return err instanceof TypeError; // Failed to fetch / network error
@@ -281,3 +302,5 @@ export async function invokeEdgeFunction<T = unknown>(
     inflightRequests.delete(lockKey);
   }
 }
+
+export { validateUserProfile };

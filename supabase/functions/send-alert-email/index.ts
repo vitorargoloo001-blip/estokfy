@@ -72,7 +72,7 @@ function buildEmailHTML(alert: AlertPayload, storeName: string): string {
               </td>
             </tr>
           </table>
-          <a href="https://estokfy.surge.sh/connect/divergencias"
+          <a href="https://estokfy.pages.dev/connect/divergencias"
              style="display:inline-block;background:${color};color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:14px;font-weight:600;">
             Verificar no Estokfy →
           </a>

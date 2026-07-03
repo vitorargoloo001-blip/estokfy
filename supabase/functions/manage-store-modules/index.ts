@@ -173,7 +173,7 @@ async function sendModuleNotification(payload: ModuleToggleRequest) {
           <li>Sincronizar transações automaticamente</li>
           <li>Reconciliar vendas com pagamentos</li>
         </ul>
-        <p><a href="https://estokfy-dibacell.netlify.app/connect">Acessar Estokfy Connect</a></p>
+        <p><a href="https://estokfy.pages.dev/connect">Acessar Estokfy Connect</a></p>
       `;
       break;
 
