@@ -62,3 +62,12 @@ Offline-first: `src/lib/offlineDb.ts` (IndexedDB queue via `idb`) + `src/lib/syn
 Production is **Cloudflare Pages only**: `https://estokfy.pages.dev`, auto-deploys on every push to `main` via GitHub integration (no manual deploy step needed — just `git push`). Supabase Auth's Site URL and Redirect URLs must stay pointed at this domain. Netlify (`estokfy-dibacell.netlify.app`) and Surge (`estokfy.surge.sh`) are decommissioned — don't reintroduce references to either; if you see one, it's a leftover from before the hosting consolidation and should be fixed to point at `estokfy.pages.dev`.
 
 Migrations are applied by pasting SQL into the Supabase SQL Editor as often as by `supabase db push` — when investigating "why doesn't this RPC/table exist," always check what's actually live in production (`information_schema`, `pg_proc`) rather than assuming the migrations folder is authoritative; the two have drifted before (objects applied live but never committed, or vice versa).
+
+## Coding practice guidelines
+
+These bias toward caution over speed; use judgment for trivial tasks.
+
+1. **Think before coding.** State assumptions explicitly. If multiple interpretations exist, present them instead of picking silently. If something is unclear, stop and ask.
+2. **Simplicity first.** Minimum code that solves the problem — no speculative features, no abstractions for single-use code, no error handling for impossible scenarios.
+3. **Surgical changes.** Touch only what the task requires. Don't refactor or reformat unrelated code, even if you'd do it differently. Remove imports/variables that your own edit made unused; leave pre-existing dead code alone (mention it, don't delete it).
+4. **Goal-driven execution.** Turn tasks into verifiable goals (e.g. "fix the bug" → "write a test that reproduces it, then make it pass") and loop until verified, rather than stopping at "looks right."
