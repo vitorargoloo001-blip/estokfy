@@ -132,6 +132,16 @@ Deno.serve(async (req: Request) => {
       .update({ status: "error", updated_at: new Date().toISOString() })
       .eq("pluggy_item_id", itemRow.id);
 
+    // Log de erro
+    await supabase.rpc("add_connect_log", {
+      p_store_id:       storeId,
+      p_log_type:       "error",
+      p_severity:       "error",
+      p_message:        `Erro de login no banco via Pluggy (${event})`,
+      p_details:        { event, pluggyItemId, errorCode: (payload.data as Record<string, unknown>)?.code },
+      p_pluggy_item_id: itemRow.id,
+    });
+
     console.log(`[pluggy-webhook] item=${pluggyItemId} marcado como login_error`);
 
   } else if (
@@ -163,6 +173,16 @@ Deno.serve(async (req: Request) => {
 
     const syncData = await syncRes.json().catch(() => ({}));
     console.log(`[pluggy-webhook] sync result for store=${storeId}:`, JSON.stringify(syncData).slice(0, 200));
+
+    // Log do webhook
+    await supabase.rpc("add_connect_log", {
+      p_store_id:       storeId,
+      p_log_type:       "webhook",
+      p_severity:       "info",
+      p_message:        `Webhook recebido: ${event}`,
+      p_details:        { event, pluggyItemId, syncResult: syncData },
+      p_pluggy_item_id: itemRow.id,
+    });
 
   } else {
     console.log(`[pluggy-webhook] evento ${event} — sem ação definida`);

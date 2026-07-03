@@ -151,6 +151,11 @@ Deno.serve(async (req: Request) => {
       }
 
       const apiKey = await getPluggyApiKey(clientId, clientSecret);
+      await supabase.rpc("add_connect_log", {
+        p_store_id: storeId, p_log_type: "sync", p_severity: "info",
+        p_message: "Sync iniciado via webhook interno",
+        p_details: { pluggyItemId: body.pluggyItemId ?? null, source: "webhook" },
+      });
       return await runSync(supabase, apiKey, storeId, body.pluggyItemId, body.fromDate, body.toDate, CORS);
 
     } else {
@@ -178,6 +183,11 @@ Deno.serve(async (req: Request) => {
 
       const body = await req.json() as { pluggyItemId?: string; fromDate?: string; toDate?: string };
       const apiKey = await getPluggyApiKey(clientId, clientSecret);
+      await supabase.rpc("add_connect_log", {
+        p_store_id: storeId, p_log_type: "sync", p_severity: "info",
+        p_message: "Sync iniciado manualmente pelo usuário",
+        p_details: { pluggyItemId: body.pluggyItemId ?? null, source: "user" },
+      });
       return await runSync(supabase, apiKey, storeId, body.pluggyItemId, body.fromDate, body.toDate, CORS);
     }
 
@@ -287,6 +297,11 @@ async function runSync(
       new:          itemNew,
     });
 
+    await supabase.rpc("add_connect_log", {
+      p_store_id: storeId, p_log_type: "sync", p_severity: "info",
+      p_message: `Sync concluído: ${itemImported} TXs importadas, ${itemNew} novas`,
+      p_details: { institution: item.institution_name, imported: itemImported, new_count: itemNew },
+    });
     console.log(`[sync] store=${storeId} item=${item.pluggy_item_id} imported=${itemImported} new=${itemNew}`);
   }
 
@@ -295,6 +310,13 @@ async function runSync(
   if (totalNew > 0) {
     const { data } = await supabase.rpc("connect_run_matching", { p_store_id: storeId });
     matchResult = data;
+    if ((data as { matches_created?: number })?.matches_created) {
+      await supabase.rpc("add_connect_log", {
+        p_store_id: storeId, p_log_type: "match", p_severity: "info",
+        p_message: `${(data as { matches_created: number }).matches_created} conciliação(ões) automática(s) criada(s)`,
+        p_details: data as Record<string, unknown>,
+      });
+    }
   }
 
   return new Response(JSON.stringify({
