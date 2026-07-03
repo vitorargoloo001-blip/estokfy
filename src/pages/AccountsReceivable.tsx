@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -11,8 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import PageHeader from '@/components/PageHeader';
 import { ShimmerList } from '@/components/ShimmerSkeleton';
 import BatchSettlePaymentDialog from '@/components/BatchSettlePaymentDialog';
-import { Wallet, Clock, AlertCircle, DollarSign, Search, Users, ChevronRight, Inbox, Package, DollarSign as DollarIcon, FileText, MessageCircle } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import { Wallet, Clock, AlertCircle, DollarSign, Search, Users, ChevronRight, ChevronDown, ChevronUp, Inbox, Package, DollarSign as DollarIcon, FileText, MessageCircle, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import EmployeeFilter from '@/components/EmployeeFilter';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -20,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { generateCustomerStatementPDF, statementFileName, type StatementSale } from '@/lib/customerStatementPdf';
+import { downloadCsv } from '@/lib/receipt';
 import { toast } from 'sonner';
 
 interface SaleItemLite {
@@ -45,6 +45,10 @@ interface PendingSale {
 
 function itemName(it: SaleItemLite): string {
   return (it.product_name_snapshot || it.products?.name || 'Produto').trim();
+}
+
+function saleCode(id: string): string {
+  return id.slice(0, 8).toUpperCase();
 }
 
 function saleItemsSummary(items: SaleItemLite[] | null | undefined): {
@@ -131,6 +135,15 @@ export default function AccountsReceivable() {
   const [statementOpen, setStatementOpen] = useState(false);
   const [statementScope, setStatementScope] = useState<'all' | 'overdue'>('all');
   const [statementAction, setStatementAction] = useState<'pdf' | 'whatsapp'>('pdf');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   const fetchData = useCallback(async () => {
     if (!profile) return;
@@ -212,6 +225,41 @@ export default function AccountsReceivable() {
   }, [visibleGroups, selectedId]);
 
   const selected = visibleGroups.find((g) => g.id === selectedId) || null;
+
+  const exportCsv = () => {
+    if (!selected || selected.sales.length === 0) return;
+    const rows: (string | number)[][] = [
+      ['Cliente', 'Venda', 'Data', 'Vencimento', 'Produto', 'Qtd', 'Valor Unit.', 'Subtotal', 'Total da Venda', 'Recebido', 'Pendente', 'Status'],
+    ];
+    const sorted = [...selected.sales].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    for (const s of sorted) {
+      const status = isOverdue(s) ? 'Vencida' : s.payment_status === 'partial' ? 'Parcial' : 'Pendente';
+      const date = new Date(s.created_at).toLocaleDateString('pt-BR');
+      const due = s.due_date ? new Date(s.due_date + 'T00:00:00').toLocaleDateString('pt-BR') : '';
+      const items = s.sale_items && s.sale_items.length > 0 ? s.sale_items : null;
+      if (!items) {
+        rows.push([selected.name, saleCode(s.id), date, due, '', '', '', '', Number(s.net_total), Number(s.amount_paid), Number(s.amount_pending), status]);
+        continue;
+      }
+      items.forEach((it, idx) => {
+        rows.push([
+          selected.name,
+          saleCode(s.id),
+          date,
+          due,
+          itemName(it),
+          it.qty,
+          Number(it.unit_price),
+          Number(it.unit_price) * it.qty,
+          idx === 0 ? Number(s.net_total) : '',
+          idx === 0 ? Number(s.amount_paid) : '',
+          idx === 0 ? Number(s.amount_pending) : '',
+          idx === 0 ? status : '',
+        ]);
+      });
+    }
+    downloadCsv(`contas-a-receber-${selected.name.replace(/[^a-zA-Z0-9]+/g, '_')}-${todayISO()}.csv`, rows);
+  };
 
   // KPIs (over filtered scope)
   const totalPending = filteredSales.reduce((s, r) => s + Number(r.amount_pending), 0);
@@ -308,6 +356,25 @@ export default function AccountsReceivable() {
     );
   };
 
+  const ItemsBreakdown = ({ items }: { items: SaleItemLite[] }) => (
+    <div className="rounded-md border bg-muted/30 divide-y overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase bg-muted/40">
+        <span className="flex-1">Produto</span>
+        <span className="w-10 text-right shrink-0">Qtd</span>
+        <span className="w-20 text-right shrink-0">Unit.</span>
+        <span className="w-20 text-right shrink-0">Subtotal</span>
+      </div>
+      {items.map((it, idx) => (
+        <div key={idx} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+          <span className="flex-1 min-w-0 break-words">{itemName(it)}</span>
+          <span className="w-10 text-right shrink-0 text-muted-foreground">{it.qty}</span>
+          <span className="w-20 text-right shrink-0 text-muted-foreground">{fmt(it.unit_price)}</span>
+          <span className="w-20 text-right shrink-0 font-medium">{fmt(it.qty * it.unit_price)}</span>
+        </div>
+      ))}
+    </div>
+  );
+
   const renderDetails = () => {
     if (!selected) {
       return (
@@ -346,6 +413,15 @@ export default function AccountsReceivable() {
                   size="lg"
                   variant="outline"
                   className="h-12"
+                  onClick={exportCsv}
+                >
+                  <Download className="h-4 w-4 mr-1.5" />
+                  Exportar CSV
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="h-12"
                   onClick={() => { setStatementAction('pdf'); setStatementScope('all'); setStatementOpen(true); }}
                 >
                   <FileText className="h-4 w-4 mr-1.5" />
@@ -379,6 +455,8 @@ export default function AccountsReceivable() {
           <div className="space-y-2">
             {[...selected.sales].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((s) => {
               const sum = saleItemsSummary(s.sale_items);
+              const items = s.sale_items || [];
+              const expanded = expandedIds.has(s.id);
               return (
               <Card
                 key={s.id}
@@ -388,17 +466,25 @@ export default function AccountsReceivable() {
                   <div className="flex justify-between items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs text-muted-foreground">
-                        {new Date(s.created_at).toLocaleDateString('pt-BR')} · #{s.id.slice(0, 6)}
+                        {new Date(s.created_at).toLocaleDateString('pt-BR')} · Venda #{saleCode(s.id)}
                       </p>
-                      <p className="text-sm font-medium leading-tight line-clamp-2 break-words" title={sum.full}>
+                      <p className="text-sm font-medium leading-tight line-clamp-2 break-words">
                         {sum.primary}
                       </p>
-                      {sum.secondary && (
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{sum.secondary}</p>
-                      )}
                     </div>
                     {statusBadge(s)}
                   </div>
+                  {items.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand(s.id)}
+                      className="flex items-center gap-1 text-[11px] font-medium text-primary"
+                    >
+                      {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      {expanded ? 'Ocultar itens' : `Ver todos os ${items.length} itens`}
+                    </button>
+                  )}
+                  {expanded && items.length > 1 && <ItemsBreakdown items={items} />}
                   <div className="grid grid-cols-3 gap-2 text-xs pt-1 border-t">
                     <div>
                       <p className="text-muted-foreground">Total</p>
@@ -430,12 +516,11 @@ export default function AccountsReceivable() {
           </div>
         ) : (
           <div className="rounded-lg border overflow-hidden">
-            <TooltipProvider delayDuration={150}>
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
                   <TableHead className="text-xs">Data</TableHead>
-                  <TableHead className="text-xs">Descrição</TableHead>
+                  <TableHead className="text-xs">Itens</TableHead>
                   <TableHead className="text-xs">Vencimento</TableHead>
                   <TableHead className="text-right text-xs">Total</TableHead>
                   <TableHead className="text-right text-xs">Recebido</TableHead>
@@ -446,32 +531,34 @@ export default function AccountsReceivable() {
               <TableBody>
                 {[...selected.sales].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((s) => {
                   const sum = saleItemsSummary(s.sale_items);
+                  const items = s.sale_items || [];
+                  const expanded = expandedIds.has(s.id);
                   return (
+                  <Fragment key={s.id}>
                   <TableRow
-                    key={s.id}
                     className={cn(isOverdue(s) && 'bg-destructive/5')}
                   >
                     <TableCell className="py-2.5 text-sm whitespace-nowrap">
                       {new Date(s.created_at).toLocaleDateString('pt-BR')}
                     </TableCell>
-                    <TableCell className="py-2.5 text-sm max-w-[280px]">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex items-start gap-2 cursor-default">
-                            <Package className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
-                            <div className="min-w-0">
-                              <p className="font-medium leading-tight line-clamp-2 break-words">{sum.primary}</p>
-                              {sum.secondary && (
-                                <p className="text-[11px] text-muted-foreground">{sum.secondary}</p>
-                              )}
-                              <p className="text-[10px] text-muted-foreground/70">#{s.id.slice(0, 6)}</p>
-                            </div>
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-xs">
-                          <p className="text-xs whitespace-pre-wrap">{sum.full || 'Sem itens'}</p>
-                        </TooltipContent>
-                      </Tooltip>
+                    <TableCell className="py-2.5 text-sm max-w-[320px]">
+                      <div className="flex items-start gap-2">
+                        <Package className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium leading-tight line-clamp-2 break-words">{sum.primary}</p>
+                          <p className="text-[10px] text-muted-foreground/70">Venda #{saleCode(s.id)}</p>
+                          {items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(s.id)}
+                              className="flex items-center gap-1 text-[11px] font-medium text-primary mt-0.5"
+                            >
+                              {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                              {expanded ? 'Ocultar itens' : `Ver todos os ${items.length} itens`}
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell
                       className={cn(
@@ -492,12 +579,18 @@ export default function AccountsReceivable() {
                     </TableCell>
                     <TableCell className="py-2.5 text-center">{statusBadge(s)}</TableCell>
                   </TableRow>
+                  {expanded && items.length > 1 && (
+                    <TableRow className={cn(isOverdue(s) && 'bg-destructive/5')}>
+                      <TableCell colSpan={7} className="py-2 px-3">
+                        <ItemsBreakdown items={items} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                   );
                 })}
               </TableBody>
             </Table>
-
-            </TooltipProvider>
           </div>
         )}
 

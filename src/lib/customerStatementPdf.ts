@@ -124,7 +124,7 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
     doc.rect(MARGIN, y - 3, W - MARGIN * 2, 8, 'F');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
     doc.setTextColor(30);
-    doc.text(`Venda · ${date}`, C_DESC, y);
+    doc.text(`Venda #${s.id.slice(0, 8).toUpperCase()} · ${date}`, C_DESC, y);
     if (s.overdue) doc.setTextColor(200, 30, 30);
     doc.text(`Venc: ${due}   ${status}`, C_RIGHT, y, { align: 'right' });
     doc.setTextColor(0);
