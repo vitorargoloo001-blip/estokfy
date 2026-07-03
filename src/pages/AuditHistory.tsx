@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -28,19 +29,21 @@ interface AuditLog {
 
 const ENTITY_LABELS: Record<string, string> = {
   sale: 'Venda', product: 'Produto', customer: 'Cliente', delivery: 'Entrega',
-  return: 'Devolução', stock: 'Estoque', payment: 'Pagamento', category: 'Categoria',
-  settings: 'Configurações', profile: 'Usuário', store: 'Loja',
+  return: 'Devolução', exchange: 'Troca', customer_credit: 'Crédito', stock: 'Estoque',
+  payment: 'Pagamento', category: 'Categoria', settings: 'Configurações', profile: 'Usuário', store: 'Loja',
 };
 
 const ACTION_LABELS: Record<string, string> = {
   create: 'Criação', update: 'Atualização', delete: 'Exclusão', archive: 'Arquivamento',
-  restore: 'Restauração', status_change: 'Mudança de status',
+  restore: 'Restauração', status_change: 'Mudança de status', edit: 'Edição', cancel: 'Cancelamento',
 };
 
 const ACTION_COLORS: Record<string, string> = {
   create: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   update: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  edit: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   delete: 'bg-destructive/10 text-destructive',
+  cancel: 'bg-destructive/10 text-destructive',
   archive: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
 };
 
@@ -49,11 +52,14 @@ const PAGE_SIZE = 50;
 export default function AuditHistory() {
   const { profile } = useAuth();
   const isMobile = useIsMobile();
+  const [searchParams] = useSearchParams();
+  const urlEntity = searchParams.get('entity');
+  const urlEntityId = searchParams.get('entity_id');
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterEntity, setFilterEntity] = useState('all');
+  const [filterEntity, setFilterEntity] = useState(urlEntity || 'all');
   const [filterAction, setFilterAction] = useState('all');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(urlEntityId || '');
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [detailLog, setDetailLog] = useState<AuditLog | null>(null);
@@ -71,13 +77,14 @@ export default function AuditHistory() {
 
     if (filterEntity !== 'all') query = query.eq('entity', filterEntity);
     if (filterAction !== 'all') query = query.eq('action', filterAction);
+    if (urlEntityId) query = query.eq('entity_id', urlEntityId);
 
     const { data } = await query;
     const results = (data as any[]) || [];
     setLogs(results);
     setHasMore(results.length === PAGE_SIZE);
     setLoading(false);
-  }, [profile, page, filterEntity, filterAction]);
+  }, [profile, page, filterEntity, filterAction, urlEntityId]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
   useEffect(() => { setPage(0); }, [filterEntity, filterAction]);

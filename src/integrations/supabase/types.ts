@@ -1952,6 +1952,9 @@ export type Database = {
       exchanges: {
         Row: {
           amount_to_pay: number | null
+          cancel_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
           created_at: string
           created_by: string | null
           credit_amount: number | null
@@ -1972,11 +1975,15 @@ export type Database = {
           reason: string | null
           return_id: string | null
           settlement: string
+          status: string
           store_id: string
           troco_amount: number | null
         }
         Insert: {
           amount_to_pay?: number | null
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           created_by?: string | null
           credit_amount?: number | null
@@ -1997,11 +2004,15 @@ export type Database = {
           reason?: string | null
           return_id?: string | null
           settlement?: string
+          status?: string
           store_id: string
           troco_amount?: number | null
         }
         Update: {
           amount_to_pay?: number | null
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           created_by?: string | null
           credit_amount?: number | null
@@ -2022,10 +2033,19 @@ export type Database = {
           reason?: string | null
           return_id?: string | null
           settlement?: string
+          status?: string
           store_id?: string
           troco_amount?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "exchanges_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       finance_cost_centers: {
         Row: {
@@ -2202,7 +2222,9 @@ export type Database = {
           amount_available: number | null
           amount_generated: number
           amount_used: number
+          cancel_reason: string | null
           cancelled_at: string | null
+          cancelled_by: string | null
           created_at: string
           customer_id: string
           expires_at: string | null
@@ -2219,7 +2241,9 @@ export type Database = {
           amount_available?: number | null
           amount_generated?: number
           amount_used?: number
+          cancel_reason?: string | null
           cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           customer_id: string
           expires_at?: string | null
@@ -2236,7 +2260,9 @@ export type Database = {
           amount_available?: number | null
           amount_generated?: number
           amount_used?: number
+          cancel_reason?: string | null
           cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           customer_id?: string
           expires_at?: string | null
@@ -2249,7 +2275,15 @@ export type Database = {
           status?: string
           store_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "loyalty_credits_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       master_audit_logs: {
         Row: {
@@ -2813,6 +2847,7 @@ export type Database = {
           paid_at: string
           paid_at_minute: number | null
           provider: string | null
+          return_id: string | null
           sale_id: string
           store_id: string
         }
@@ -2827,6 +2862,7 @@ export type Database = {
           paid_at?: string
           paid_at_minute?: number | null
           provider?: string | null
+          return_id?: string | null
           sale_id: string
           store_id: string
         }
@@ -2841,10 +2877,18 @@ export type Database = {
           paid_at?: string
           paid_at_minute?: number | null
           provider?: string | null
+          return_id?: string | null
           sale_id?: string
           store_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "payments_return_id_fkey"
+            columns: ["return_id"]
+            isOneToOne: false
+            referencedRelation: "returns"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "payments_sale_id_fkey"
             columns: ["sale_id"]
@@ -3408,6 +3452,66 @@ export type Database = {
           },
         ]
       }
+      return_exchange_versions: {
+        Row: {
+          action: string
+          actor_profile_id: string | null
+          actor_user_id: string | null
+          created_at: string
+          id: string
+          impacts: Json
+          new_data: Json | null
+          old_data: Json | null
+          operation_id: string
+          operation_type: string
+          reason: string
+          store_id: string
+        }
+        Insert: {
+          action: string
+          actor_profile_id?: string | null
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          impacts?: Json
+          new_data?: Json | null
+          old_data?: Json | null
+          operation_id: string
+          operation_type: string
+          reason: string
+          store_id: string
+        }
+        Update: {
+          action?: string
+          actor_profile_id?: string | null
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          impacts?: Json
+          new_data?: Json | null
+          old_data?: Json | null
+          operation_id?: string
+          operation_type?: string
+          reason?: string
+          store_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "return_exchange_versions_actor_profile_id_fkey"
+            columns: ["actor_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "return_exchange_versions_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       return_items: {
         Row: {
           id: string
@@ -3462,6 +3566,9 @@ export type Database = {
       }
       returns: {
         Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -3472,6 +3579,9 @@ export type Database = {
           store_id: string
         }
         Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -3482,6 +3592,9 @@ export type Database = {
           store_id: string
         }
         Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -3492,6 +3605,13 @@ export type Database = {
           store_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "returns_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "returns_created_by_fkey"
             columns: ["created_by"]
@@ -4836,6 +4956,10 @@ export type Database = {
         }[]
       }
       can_delete_employee: { Args: { p_profile_id: string }; Returns: boolean }
+      can_manage_sensitive_operations: {
+        Args: { p_store_id: string }
+        Returns: boolean
+      }
       cancel_connect_for_store: {
         Args: { p_reason?: string; p_store_id: string }
         Returns: Json
@@ -4847,6 +4971,18 @@ export type Database = {
           new_status: string
           success: boolean
         }[]
+      }
+      cancel_customer_credit: {
+        Args: { p_cancel_reason: string; p_credit_id: string }
+        Returns: Json
+      }
+      cancel_exchange_atomic: {
+        Args: { p_cancel_reason: string; p_exchange_id: string }
+        Returns: Json
+      }
+      cancel_return_atomic: {
+        Args: { p_cancel_reason: string; p_return_id: string }
+        Returns: Json
       }
       check_connect_enabled: { Args: { p_store_id: string }; Returns: boolean }
       check_store_access: { Args: { p_store_id: string }; Returns: boolean }
@@ -5119,6 +5255,38 @@ export type Database = {
         Returns: number
       }
       dismiss_connect_alert: { Args: { p_alert_id: string }; Returns: boolean }
+      edit_customer_credit: {
+        Args: {
+          p_credit_id: string
+          p_edit_reason: string
+          p_new_amount_generated: number
+          p_new_reason: string
+        }
+        Returns: Json
+      }
+      edit_exchange_reason: {
+        Args: {
+          p_edit_reason: string
+          p_exchange_id: string
+          p_new_notes: string
+          p_new_reason: string
+        }
+        Returns: Json
+      }
+      edit_return_atomic: {
+        Args: {
+          p_customer_id: string
+          p_edit_reason: string
+          p_items: Json
+          p_notes: string
+          p_reason: string
+          p_refund_mode: string
+          p_return_id: string
+          p_surplus_mode: string
+          p_target_sale_id: string
+        }
+        Returns: Json
+      }
       edit_sale_atomic: {
         Args: {
           p_allow_negative_stock?: boolean
@@ -6532,6 +6700,10 @@ export type Database = {
       }
       revert_loyalty_credit_uses_for_sale: {
         Args: { p_sale_id: string }
+        Returns: Json
+      }
+      revert_return_effects: {
+        Args: { p_profile_id: string; p_return_id: string; p_store: string }
         Returns: Json
       }
       save_ai_interaction: {

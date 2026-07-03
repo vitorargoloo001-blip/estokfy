@@ -681,6 +681,9 @@ const securityConfig = {
       { key: 'confirm_sensitive_actions', label: 'Exigir confirmação para ações sensíveis' },
       { key: 'show_audit_logs', label: 'Exibir logs de auditoria' },
     ]},
+    { title: 'Permissões Críticas', desc: 'Editar/cancelar créditos, trocas e devoluções é restrito a owner/admin por padrão.', items: [
+      { key: 'manager_can_manage_sensitive_ops', label: 'Permitir que gerentes (manager) também editem/cancelem créditos, trocas e devoluções' },
+    ]},
   ],
 };
 

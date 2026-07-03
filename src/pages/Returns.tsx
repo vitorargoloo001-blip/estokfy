@@ -12,12 +12,15 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Trash2, RotateCcw, Package, Loader2, CreditCard, Banknote, ArrowLeftRight, Search, ShoppingCart, Coins } from 'lucide-react';
+import { Plus, Trash2, RotateCcw, Package, Loader2, CreditCard, Banknote, ArrowLeftRight, Search, ShoppingCart, Coins, Pencil, Ban, ScrollText } from 'lucide-react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { logger } from '@/lib/logger';
 import EmployeeFilter from '@/components/EmployeeFilter';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useSensitiveOpsPermission } from '@/hooks/useSensitiveOpsPermission';
+import SensitiveActionDialog from '@/components/SensitiveActionDialog';
 import { CustomerSearch } from '@/components/CustomerSearch';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 
@@ -42,6 +45,7 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
   received: { label: 'Recebida', variant: 'secondary' },
   rejected: { label: 'Rejeitada', variant: 'destructive' },
   closed: { label: 'Fechada', variant: 'secondary' },
+  cancelled: { label: 'Cancelada', variant: 'destructive' },
 };
 
 const FRIENDLY_ERRORS: Record<string, string> = {
@@ -84,16 +88,23 @@ interface DebtRow {
 
 export default function Returns() {
   const { profile, session } = useAuth();
+  const navigate = useNavigate();
   const { canManageEmployees } = usePermissions();
+  const { allowed: canManageSensitiveOps } = useSensitiveOpsPermission();
   const isMobile = useIsMobile();
   const storeId = profile?.store_id;
 
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
+  const [exchangeReturnIds, setExchangeReturnIds] = useState<Set<string>>(new Set());
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [sellerId, setSellerId] = useState<string | null>(null);
+  const [editingReturnId, setEditingReturnId] = useState<string | null>(null);
+  const [editReasonText, setEditReasonText] = useState('');
+  const [cancelingReturn, setCancelingReturn] = useState<ReturnRecord | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState(false);
 
   // operação
   const [operation, setOperation] = useState<'devolucao' | 'troca'>('devolucao');
@@ -177,6 +188,9 @@ export default function Returns() {
       const { data, error } = await q.order('created_at', { ascending: false }).limit(50);
       if (error) { logger.error('Returns.loadReturns', error); toast.error('Erro ao carregar devoluções.'); }
       setReturns((data as any) || []);
+
+      const { data: exch } = await supabase.from('exchanges').select('return_id').eq('store_id', storeId).not('return_id', 'is', null);
+      setExchangeReturnIds(new Set(((exch as any[]) || []).map((e) => e.return_id)));
     } finally {
       setLoading(false);
     }
@@ -268,6 +282,97 @@ export default function Returns() {
     setDebts([]); setDebtMode('oldest'); setTargetSaleId('');
     setRetQuery(''); setRetResults([]);
     setNewItems([]); setProdQuery(''); setProdResults([]); setDiffPayMethod('pix'); setSurplusMode('credit');
+    setEditingReturnId(null); setEditReasonText('');
+  };
+
+  const openEditReturn = async (r: ReturnRecord) => {
+    setLoadingEdit(true);
+    try {
+      const { data: itemsData } = await supabase
+        .from('return_items')
+        .select('product_id, qty, refund_amount, restock, sale_item_id, products(name)')
+        .eq('return_id', r.id);
+
+      const [{ data: creditRow }, { data: cashRow }, { data: paymentRow }] = await Promise.all([
+        supabase.from('loyalty_credits').select('id, customer_id').eq('source_return_id', r.id).neq('status', 'cancelled').maybeSingle(),
+        supabase.from('cash_entries').select('id').eq('reference_type', 'return').eq('reference_id', r.id).maybeSingle(),
+        supabase.from('payments').select('id, sale_id').eq('return_id', r.id).maybeSingle(),
+      ]);
+
+      let mode: 'credit' | 'cash' | 'abatimento' = 'credit';
+      let customerId: string | null = null;
+      if (creditRow) { mode = 'credit'; customerId = (creditRow as any).customer_id; }
+      else if (paymentRow) {
+        mode = 'abatimento';
+        const { data: saleRow } = await supabase.from('sales').select('customer_id').eq('id', (paymentRow as any).sale_id).maybeSingle();
+        customerId = (saleRow as any)?.customer_id || null;
+      } else if (cashRow) { mode = 'cash'; }
+
+      setOperation('devolucao');
+      setIsAvulsa(!r.sale_id);
+      setReason(r.reason);
+      setNotes(r.notes || '');
+      setSelectedSaleId(r.sale_id || '');
+      setSaleCustomerId(customerId);
+      setManualCustomerId(customerId);
+      setRefundMode(mode);
+      setItems(((itemsData as any[]) || []).map((it) => ({
+        product_id: it.product_id,
+        product_name: it.products?.name || 'Produto',
+        sale_item_id: it.sale_item_id,
+        qty: it.qty,
+        max_qty: 9999,
+        restock: it.restock,
+        refund_amount: it.qty > 0 ? it.refund_amount / it.qty : it.refund_amount,
+      })));
+      setTargetSaleId(mode === 'abatimento' && paymentRow ? (paymentRow as any).sale_id : '');
+      setDebtMode(mode === 'abatimento' ? 'manual' : 'oldest');
+      setEditingReturnId(r.id);
+      setEditReasonText('');
+      setDialogOpen(true);
+    } catch (err: any) {
+      toast.error('Erro ao carregar devolução para edição.');
+      logger.error('Returns.openEditReturn', err);
+    } finally {
+      setLoadingEdit(false);
+    }
+  };
+
+  const handleEditReturn = async () => {
+    if (!editingReturnId) return;
+    if (items.length === 0) { toast.error('Adicione pelo menos um item.'); return; }
+    if (editReasonText.trim().length < 3) { toast.error('Informe o motivo da edição (mínimo 3 caracteres).'); return; }
+    setSubmitting(true);
+    try {
+      const payload: Record<string, any> = {
+        p_return_id: editingReturnId,
+        p_customer_id: effectiveCustomerId,
+        p_reason: reason,
+        p_items: items.map((i) => ({ product_id: i.product_id, sale_item_id: i.sale_item_id, qty: i.qty, restock: i.restock, refund_amount: i.refund_amount * i.qty })),
+        p_notes: notes || null,
+        p_refund_mode: refundMode,
+        p_target_sale_id: refundMode === 'abatimento' ? (debtMode === 'manual' ? targetSaleId : null) : null,
+        p_surplus_mode: surplusMode,
+        p_edit_reason: editReasonText.trim(),
+      };
+      const { error } = await supabase.rpc('edit_return_atomic' as any, payload as any);
+      if (error) { failWith(error, 'edicao_devolucao'); return; }
+      toast.success('Devolução atualizada!');
+      setDialogOpen(false); resetForm(); loadReturns();
+    } catch (err: any) {
+      failWith(err, 'edicao_devolucao');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCancelReturn = async (reason: string) => {
+    if (!cancelingReturn) return;
+    const { error } = await supabase.rpc('cancel_return_atomic' as any, { p_return_id: cancelingReturn.id, p_cancel_reason: reason } as any);
+    if (error) { toast.error(resolveFriendlyError(error.message || '')); return; }
+    toast.success('Devolução cancelada.');
+    setCancelingReturn(null);
+    loadReturns();
   };
 
   const failWith = (err: any, ctx: string) => {
@@ -279,6 +384,7 @@ export default function Returns() {
 
   const handleSubmit = async () => {
     if (submitting) return;
+    if (editingReturnId) { handleEditReturn(); return; }
     if (operation === 'troca') { handleExchange(); return; }
 
     // ---- DEVOLUÇÃO ----
@@ -384,26 +490,30 @@ export default function Returns() {
               <Button size={isMobile ? 'sm' : 'default'}><Plus className="mr-1 h-4 w-4" /> {isMobile ? 'Nova' : 'Nova operação'}</Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>{operation === 'troca' ? 'Registrar Troca' : 'Registrar Devolução'}</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>{editingReturnId ? 'Editar Devolução' : operation === 'troca' ? 'Registrar Troca' : 'Registrar Devolução'}</DialogTitle></DialogHeader>
               <div className="space-y-4 pt-2">
                 {/* Tipo de operação */}
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setOperation('devolucao')}
-                    className={`flex items-center justify-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition ${operation === 'devolucao' ? 'border-primary bg-primary/5 ring-1 ring-primary text-primary' : 'hover:bg-accent'}`}>
-                    <RotateCcw className="h-4 w-4" /> Devolução
-                  </button>
-                  <button type="button" onClick={() => setOperation('troca')}
-                    className={`flex items-center justify-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition ${operation === 'troca' ? 'border-primary bg-primary/5 ring-1 ring-primary text-primary' : 'hover:bg-accent'}`}>
-                    <ArrowLeftRight className="h-4 w-4" /> Troca
-                  </button>
-                </div>
+                {!editingReturnId && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setOperation('devolucao')}
+                      className={`flex items-center justify-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition ${operation === 'devolucao' ? 'border-primary bg-primary/5 ring-1 ring-primary text-primary' : 'hover:bg-accent'}`}>
+                      <RotateCcw className="h-4 w-4" /> Devolução
+                    </button>
+                    <button type="button" onClick={() => setOperation('troca')}
+                      className={`flex items-center justify-center gap-2 rounded-lg border p-2.5 text-sm font-medium transition ${operation === 'troca' ? 'border-primary bg-primary/5 ring-1 ring-primary text-primary' : 'hover:bg-accent'}`}>
+                      <ArrowLeftRight className="h-4 w-4" /> Troca
+                    </button>
+                  </div>
+                )}
 
                 {/* Avulsa */}
-                <label className="flex items-center gap-2 rounded-lg border p-2.5 text-sm cursor-pointer">
-                  <Checkbox checked={isAvulsa} onCheckedChange={(v) => { setIsAvulsa(!!v); setSelectedSaleId(''); setSaleItems([]); setSaleCustomerId(null); setItems([]); }} />
-                  <span className="font-medium">Sem venda vinculada (avulsa)</span>
-                  <span className="text-[11px] text-muted-foreground">— cliente não tem a nota/venda</span>
-                </label>
+                {!editingReturnId && (
+                  <label className="flex items-center gap-2 rounded-lg border p-2.5 text-sm cursor-pointer">
+                    <Checkbox checked={isAvulsa} onCheckedChange={(v) => { setIsAvulsa(!!v); setSelectedSaleId(''); setSaleItems([]); setSaleCustomerId(null); setItems([]); }} />
+                    <span className="font-medium">Sem venda vinculada (avulsa)</span>
+                    <span className="text-[11px] text-muted-foreground">— cliente não tem a nota/venda</span>
+                  </label>
+                )}
 
                 <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
                   {!isAvulsa && (
@@ -667,8 +777,17 @@ export default function Returns() {
                 )}
 
                 <div className="space-y-2"><Label>Observações{isAvulsa ? ' *' : ''}</Label><Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder={isAvulsa ? 'Descreva a peça/situação (recomendado em troca avulsa)' : 'Opcional...'} /></div>
+
+                {editingReturnId && (
+                  <div className="space-y-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                    <Label className="text-destructive">Motivo da edição *</Label>
+                    <Textarea value={editReasonText} onChange={e => setEditReasonText(e.target.value.slice(0, 500))} rows={2} placeholder="Descreva o motivo desta alteração..." />
+                    <p className="text-xs text-muted-foreground text-right">{editReasonText.length}/500</p>
+                  </div>
+                )}
+
                 <Button className="w-full h-11" onClick={handleSubmit} disabled={submitting || items.length === 0 || (operation === 'troca' && newItems.length === 0)}>
-                  {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Registrando...</> : operation === 'troca' ? 'Registrar Troca' : 'Registrar Devolução'}
+                  {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{editingReturnId ? 'Salvando...' : 'Registrando...'}</> : editingReturnId ? 'Salvar edição' : operation === 'troca' ? 'Registrar Troca' : 'Registrar Devolução'}
                 </Button>
               </div>
             </DialogContent>
@@ -687,9 +806,11 @@ export default function Returns() {
             const status = STATUS_MAP[r.status] || { label: r.status, variant: 'outline' as const };
             const refund = r.return_items?.reduce((s, i) => s + i.refund_amount, 0) || 0;
             const totalQty = r.return_items?.reduce((s, i) => s + i.qty, 0) || 0;
+            const isExchangeLinked = exchangeReturnIds.has(r.id);
+            const canEditCancel = canManageSensitiveOps && !isExchangeLinked && r.status !== 'cancelled';
             return (
               <Card key={r.id}>
-                <CardContent className="p-3">
+                <CardContent className="p-3 space-y-2">
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="text-sm font-medium">{REASONS.find(rr => rr.value === r.reason)?.label || r.reason}</p>
@@ -697,7 +818,24 @@ export default function Returns() {
                     </div>
                     <Badge variant={status.variant}>{status.label}</Badge>
                   </div>
-                  <div className="mt-2 pt-2 border-t"><span className="text-sm font-semibold">{fmt(refund)}</span></div>
+                  <div className="pt-2 border-t"><span className="text-sm font-semibold">{fmt(refund)}</span></div>
+                  {canManageSensitiveOps && (
+                    <div className="flex items-center gap-1 pt-1 border-t">
+                      {canEditCancel && (
+                        <>
+                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => openEditReturn(r)} disabled={loadingEdit}>
+                            <Pencil className="h-3 w-3 mr-1" /> Editar
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => setCancelingReturn(r)}>
+                            <Ban className="h-3 w-3 mr-1" /> Cancelar
+                          </Button>
+                        </>
+                      )}
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => navigate(`/historico?entity=return&entity_id=${r.id}`)}>
+                        <ScrollText className="h-3 w-3 mr-1" /> Auditoria
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );
@@ -707,14 +845,16 @@ export default function Returns() {
         <Card>
           <CardContent className="p-0">
             <Table>
-              <TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Motivo</TableHead><TableHead>Itens</TableHead><TableHead>Valor</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Motivo</TableHead><TableHead>Itens</TableHead><TableHead>Valor</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader>
               <TableBody>
                 {returns.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground"><RotateCcw className="mx-auto h-8 w-8 mb-2 opacity-50" />Nenhuma operação</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground"><RotateCcw className="mx-auto h-8 w-8 mb-2 opacity-50" />Nenhuma operação</TableCell></TableRow>
                 ) : returns.map(r => {
                   const status = STATUS_MAP[r.status] || { label: r.status, variant: 'outline' as const };
                   const refund = r.return_items?.reduce((s, i) => s + i.refund_amount, 0) || 0;
                   const totalQty = r.return_items?.reduce((s, i) => s + i.qty, 0) || 0;
+                  const isExchangeLinked = exchangeReturnIds.has(r.id);
+                  const canEditCancel = canManageSensitiveOps && !isExchangeLinked && r.status !== 'cancelled';
                   return (
                     <TableRow key={r.id}>
                       <TableCell>{new Date(r.created_at).toLocaleDateString('pt-BR')}</TableCell>
@@ -722,6 +862,25 @@ export default function Returns() {
                       <TableCell>{totalQty} item(s)</TableCell>
                       <TableCell>{fmt(refund)}</TableCell>
                       <TableCell><Badge variant={status.variant}>{status.label}</Badge></TableCell>
+                      <TableCell>
+                        {canManageSensitiveOps && (
+                          <div className="flex items-center gap-1 justify-end">
+                            {canEditCancel && (
+                              <>
+                                <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar" onClick={() => openEditReturn(r)} disabled={loadingEdit}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="Cancelar" onClick={() => setCancelingReturn(r)}>
+                                  <Ban className="h-3.5 w-3.5" />
+                                </Button>
+                              </>
+                            )}
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Ver auditoria" onClick={() => navigate(`/historico?entity=return&entity_id=${r.id}`)}>
+                              <ScrollText className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -730,6 +889,20 @@ export default function Returns() {
           </CardContent>
         </Card>
       )}
+
+      <SensitiveActionDialog
+        open={!!cancelingReturn}
+        onOpenChange={(o) => !o && setCancelingReturn(null)}
+        title="Cancelar devolução"
+        summary={cancelingReturn && (
+          <div>
+            <p><strong>{REASONS.find((rr) => rr.value === cancelingReturn.reason)?.label || cancelingReturn.reason}</strong></p>
+            <p className="text-muted-foreground">{new Date(cancelingReturn.created_at).toLocaleDateString('pt-BR')}</p>
+          </div>
+        )}
+        confirmLabel="Confirmar cancelamento"
+        onConfirm={handleCancelReturn}
+      />
     </div>
   );
 }

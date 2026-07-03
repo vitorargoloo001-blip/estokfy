@@ -1,14 +1,21 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Wallet, Search, Users, History, Gift, RotateCcw, ArrowLeftRight } from 'lucide-react';
+import { Wallet, Search, Users, History, Gift, RotateCcw, ArrowLeftRight, Pencil, Ban, ScrollText, Loader2 } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useSensitiveOpsPermission } from '@/hooks/useSensitiveOpsPermission';
+import SensitiveActionDialog from '@/components/SensitiveActionDialog';
+import { toast } from 'sonner';
 
 interface CreditRow {
   id: string;
@@ -52,14 +59,21 @@ function originInfo(o: string | null) {
 
 export default function CustomerCredits() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const storeId = profile?.store_id;
+  const { allowed: canManageSensitiveOps } = useSensitiveOpsPermission();
 
   const [loading, setLoading] = useState(true);
   const [customers, setCustomers] = useState<CustomerAgg[]>([]);
   const [uses, setUses] = useState<UseRow[]>([]);
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState<CustomerAgg | null>(null);
+  const [editingCredit, setEditingCredit] = useState<CreditRow | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editReasonText, setEditReasonText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [cancelingCredit, setCancelingCredit] = useState<CreditRow | null>(null);
 
   const fmt = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const fmtDate = (d: string) => new Date(d).toLocaleDateString('pt-BR');
@@ -131,6 +145,42 @@ export default function CustomerCredits() {
     () => (detail ? uses.filter((u) => u.customer_id === detail.customer_id) : []),
     [detail, uses]
   );
+
+  const handleSaveEdit = async () => {
+    if (!editingCredit) return;
+    const amount = Number(editAmount);
+    if (!Number.isFinite(amount) || amount < 0) { toast.error('Valor inválido.'); return; }
+    if (editReasonText.trim().length < 3) { toast.error('Informe a justificativa (mínimo 3 caracteres).'); return; }
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase.rpc('edit_customer_credit' as any, {
+        p_credit_id: editingCredit.id,
+        p_new_amount_generated: amount,
+        p_new_reason: editReasonText.trim(),
+        p_edit_reason: editReasonText.trim(),
+      } as any);
+      if (error) throw error;
+      toast.success('Crédito atualizado!');
+      setEditingCredit(null);
+      load();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao editar crédito.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleCancelCredit = async (reason: string) => {
+    if (!cancelingCredit) return;
+    const { error } = await supabase.rpc('cancel_customer_credit' as any, {
+      p_credit_id: cancelingCredit.id,
+      p_cancel_reason: reason,
+    } as any);
+    if (error) { toast.error(error.message || 'Erro ao cancelar crédito.'); return; }
+    toast.success('Crédito cancelado.');
+    setCancelingCredit(null);
+    load();
+  };
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -236,16 +286,33 @@ export default function CustomerCredits() {
                     const oi = originInfo(cr.origin);
                     const OiIcon = oi.icon;
                     return (
-                      <div key={cr.id} className="flex items-center justify-between rounded border p-2 text-sm">
-                        <div className="min-w-0">
-                          <Badge variant="outline" className={oi.cls}><OiIcon className="h-3 w-3 mr-1" />{oi.label}</Badge>
-                          <span className="text-xs text-muted-foreground ml-2">{fmtDate(cr.generated_at)}</span>
-                          <div className="text-[11px] text-muted-foreground truncate">{cr.reason}</div>
+                      <div key={cr.id} className="rounded border p-2 text-sm space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0">
+                            <Badge variant="outline" className={oi.cls}><OiIcon className="h-3 w-3 mr-1" />{oi.label}</Badge>
+                            <span className="text-xs text-muted-foreground ml-2">{fmtDate(cr.generated_at)}</span>
+                            <div className="text-[11px] text-muted-foreground truncate">{cr.reason}</div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="font-semibold text-primary">{fmt(Number(cr.amount_available))}</div>
+                            <div className="text-[11px] text-muted-foreground">de {fmt(Number(cr.amount_generated))}</div>
+                          </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-semibold text-primary">{fmt(Number(cr.amount_available))}</div>
-                          <div className="text-[11px] text-muted-foreground">de {fmt(Number(cr.amount_generated))}</div>
-                        </div>
+                        {canManageSensitiveOps && (
+                          <div className="flex items-center gap-1 pt-1 border-t">
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
+                              setEditingCredit(cr); setEditAmount(String(cr.amount_generated)); setEditReasonText(cr.reason || '');
+                            }}>
+                              <Pencil className="h-3 w-3 mr-1" /> Editar
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => setCancelingCredit(cr)}>
+                              <Ban className="h-3 w-3 mr-1" /> Cancelar
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => navigate(`/historico?entity=customer_credit&entity_id=${cr.id}`)}>
+                              <ScrollText className="h-3 w-3 mr-1" /> Ver auditoria
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -271,6 +338,47 @@ export default function CustomerCredits() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Editar crédito */}
+      <Dialog open={!!editingCredit} onOpenChange={(o) => !o && !savingEdit && setEditingCredit(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar crédito</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Valor gerado (corrigido) *</Label>
+              <Input type="number" step="0.01" min={0} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} className="h-11" />
+              {editingCredit && <p className="text-xs text-muted-foreground">Já utilizado: {fmt(Number(editingCredit.amount_used))} (não pode reduzir abaixo disso)</p>}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-destructive">Justificativa da correção *</Label>
+              <Textarea value={editReasonText} onChange={(e) => setEditReasonText(e.target.value.slice(0, 500))} rows={2} placeholder="Motivo da correção do valor/observação..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingCredit(null)} disabled={savingEdit}>Cancelar</Button>
+            <Button onClick={handleSaveEdit} disabled={savingEdit}>
+              {savingEdit ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Salvando...</> : 'Salvar alteração'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancelar crédito */}
+      <SensitiveActionDialog
+        open={!!cancelingCredit}
+        onOpenChange={(o) => !o && setCancelingCredit(null)}
+        title="Cancelar crédito"
+        summary={cancelingCredit && (
+          <div>
+            <p><strong>{cancelingCredit.reason}</strong></p>
+            <p className="text-muted-foreground">Saldo disponível: {fmt(Number(cancelingCredit.amount_available))}</p>
+          </div>
+        )}
+        confirmLabel="Confirmar cancelamento"
+        onConfirm={handleCancelCredit}
+      />
     </div>
   );
 }
