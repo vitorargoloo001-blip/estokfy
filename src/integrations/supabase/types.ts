@@ -5112,6 +5112,16 @@ export type Database = {
         }
         Returns: string
       }
+      create_manual_bank_connection: {
+        Args: {
+          p_account_number: string
+          p_account_type: string
+          p_agency?: string
+          p_bank_name: string
+          p_store_id: string
+        }
+        Returns: string
+      }
       create_master_client: {
         Args: {
           p_city?: string
@@ -5473,6 +5483,7 @@ export type Database = {
           pluggy_external_item_id: string
           pluggy_item_id: string
           pluggy_status: string
+          provider: string
           status: string
           total_transactions: number
         }[]
@@ -6267,6 +6278,14 @@ export type Database = {
           message: string
           success: boolean
         }[]
+      }
+      import_bank_statement: {
+        Args: {
+          p_bank_connection_id: string
+          p_store_id: string
+          p_transactions: Json
+        }
+        Returns: Json
       }
       is_master_user: { Args: never; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
@@ -7217,3 +7236,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+{"_tag":"Error","error":{"code":"UnknownError","message":"Timeout while shutting down PostHog. Some events may not have been sent."}}

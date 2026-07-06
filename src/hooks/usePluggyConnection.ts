@@ -26,6 +26,7 @@ export interface BankConnectionPluggy {
   pluggy_status: string | null;
   institution_name: string | null;
   last_synced_at: string | null;
+  provider: string;
 }
 
 export interface PluggyWidgetCallbacks {
@@ -287,6 +288,74 @@ export function usePluggyConnection() {
     }
   }, [loadConnections]);
 
+  // ── Criar conexão manual (importação de extrato, sem Pluggy) ──────
+  const [creatingManual, setCreatingManual] = useState(false);
+  const createManualConnection = useCallback(async (
+    bankName: string,
+    accountNumber: string,
+    accountType: string,
+    agency?: string
+  ) => {
+    if (!profile?.store_id) return null;
+    setCreatingManual(true);
+    try {
+      const { data, error: err } = await supabase.rpc("create_manual_bank_connection", {
+        p_store_id: profile.store_id,
+        p_bank_name: bankName,
+        p_account_number: accountNumber,
+        p_account_type: accountType,
+        p_agency: agency || null,
+      });
+      if (err) throw err;
+      toast.success("Banco adicionado! Agora importe o extrato (OFX ou CSV).");
+      await loadConnections();
+      return data as string;
+    } catch (e) {
+      toast.error("Erro ao adicionar banco: " + String(e));
+      return null;
+    } finally {
+      setCreatingManual(false);
+    }
+  }, [profile?.store_id, loadConnections]);
+
+  // ── Importar extrato (OFX/CSV) para uma conexão manual ────────────
+  const [importingStatement, setImportingStatement] = useState<Record<string, boolean>>({});
+  const importStatement = useCallback(async (
+    bankConnectionId: string,
+    transactions: { fileRef: string; date: string; amount: number; type: string; method: string; description: string }[]
+  ) => {
+    if (!profile?.store_id) return null;
+    setImportingStatement((s) => ({ ...s, [bankConnectionId]: true }));
+    try {
+      const { data, error: err } = await supabase.rpc("import_bank_statement", {
+        p_store_id: profile.store_id,
+        p_bank_connection_id: bankConnectionId,
+        p_transactions: transactions.map((t) => ({
+          external_ref: `${bankConnectionId}:${t.fileRef}`,
+          date: t.date,
+          amount: t.amount,
+          type: t.type,
+          method: t.method,
+          description: t.description,
+        })),
+      });
+      if (err) throw err;
+      const result = data as { imported: number; duplicates: number; skipped: number; match_result?: { matches_created?: number } };
+      toast.success(
+        `${result.imported} transação(ões) importada(s)` +
+        (result.duplicates ? `, ${result.duplicates} já existiam` : "") +
+        (result.match_result?.matches_created ? `, ${result.match_result.matches_created} conciliada(s) automaticamente` : "") + "."
+      );
+      await loadConnections();
+      return result;
+    } catch (e) {
+      toast.error("Erro ao importar extrato: " + String(e));
+      return null;
+    } finally {
+      setImportingStatement((s) => ({ ...s, [bankConnectionId]: false }));
+    }
+  }, [profile?.store_id, loadConnections]);
+
   return {
     connections,
     loading,
@@ -299,6 +368,10 @@ export function usePluggyConnection() {
     reconnect,
     disconnect,
     removeManualConnection,
+    createManualConnection,
+    creatingManual,
+    importStatement,
+    importingStatement,
     isReady: true,
   };
 }

@@ -1,15 +1,20 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertCircle, CheckCircle2, Clock, RefreshCw, Plug2, Building2,
-  Trash2, RotateCcw, Wifi, WifiOff, Info, ExternalLink, ShieldCheck,
+  Trash2, RotateCcw, Wifi, WifiOff, Info, ExternalLink, ShieldCheck, Upload, FileUp,
 } from "lucide-react";
+import { toast } from "sonner";
 import { usePluggyConnection } from "@/hooks/usePluggyConnection";
+import { parseStatementFile, type ParsedTransaction } from "@/lib/statementParsers";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -51,6 +56,7 @@ export default function ConnectBankConnections() {
   const {
     connections, loading, syncing, connecting, error,
     loadConnections, openWidget, syncNow, reconnect, disconnect, removeManualConnection,
+    createManualConnection, creatingManual, importStatement, importingStatement,
   } = usePluggyConnection();
 
   const [confirmDisconnect, setConfirmDisconnect] = useState<{
@@ -58,6 +64,59 @@ export default function ConnectBankConnections() {
     name: string;
     pluggyItemDbId: string | null;
   } | null>(null);
+
+  // ── Adicionar banco manual (importação OFX/CSV) ────────────────────
+  const [showAddManual, setShowAddManual] = useState(false);
+  const [manualBankName, setManualBankName] = useState("");
+  const [manualAccountNumber, setManualAccountNumber] = useState("");
+  const [manualAccountType, setManualAccountType] = useState("checking");
+  const [manualAgency, setManualAgency] = useState("");
+
+  const handleCreateManual = async () => {
+    if (!manualBankName.trim() || !manualAccountNumber.trim()) {
+      toast.error("Informe o nome do banco e o número da conta.");
+      return;
+    }
+    const id = await createManualConnection(manualBankName, manualAccountNumber, manualAccountType, manualAgency);
+    if (id) {
+      setShowAddManual(false);
+      setManualBankName(""); setManualAccountNumber(""); setManualAccountType("checking"); setManualAgency("");
+    }
+  };
+
+  // ── Importar extrato (OFX/CSV) ──────────────────────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingImportConnId, setPendingImportConnId] = useState<string | null>(null);
+  const [previewImport, setPreviewImport] = useState<{ connectionId: string; connectionName: string; transactions: ParsedTransaction[] } | null>(null);
+
+  const triggerImport = (connectionId: string) => {
+    setPendingImportConnId(connectionId);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const connId = pendingImportConnId;
+    e.target.value = "";
+    if (!file || !connId) return;
+    try {
+      const parsed = await parseStatementFile(file);
+      if (parsed.length === 0) {
+        toast.error("Nenhuma transação reconhecida no arquivo. Verifique o formato (OFX ou CSV: Data, Descrição, Valor).");
+        return;
+      }
+      const conn = connections.find((c) => c.id === connId);
+      setPreviewImport({ connectionId: connId, connectionName: conn?.bank_name ?? "banco", transactions: parsed });
+    } catch (err) {
+      toast.error("Erro ao ler o arquivo: " + String(err));
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!previewImport) return;
+    await importStatement(previewImport.connectionId, previewImport.transactions);
+    setPreviewImport(null);
+  };
 
   const handleDisconnect = async () => {
     if (!confirmDisconnect) return;
@@ -86,13 +145,17 @@ export default function ConnectBankConnections() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Bancos Conectados</h2>
           <p className="text-muted-foreground mt-1">
-            Conecte sua conta bancária via Pluggy para importar transações automaticamente.
+            Conecte via Pluggy (automático) ou importe o extrato manualmente (OFX/CSV, sem depender de terceiros).
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => loadConnections()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
             Atualizar
+          </Button>
+          <Button variant="outline" onClick={() => setShowAddManual(true)}>
+            <FileUp className="h-4 w-4 mr-2" />
+            Adicionar banco manual
           </Button>
           <Button onClick={openWidget} disabled={connecting}>
             {connecting
@@ -101,6 +164,14 @@ export default function ConnectBankConnections() {
           </Button>
         </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".ofx,.csv,text/csv"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
 
       {/* Banner de segurança */}
       <Card className="bg-blue-50 border-blue-200">
@@ -140,14 +211,20 @@ export default function ConnectBankConnections() {
             <div>
               <h3 className="text-lg font-semibold">Nenhum banco conectado</h3>
               <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
-                Clique em <strong>Conectar banco</strong> para vincular sua conta e começar a
-                importar transações automaticamente.
+                Conecte via <strong>Pluggy</strong> (sincronização automática) ou clique em{" "}
+                <strong>Adicionar banco manual</strong> para importar o extrato (OFX/CSV).
               </p>
             </div>
-            <Button onClick={openWidget} disabled={connecting} className="mx-auto">
-              <Plug2 className="h-4 w-4 mr-2" />
-              Conectar banco
-            </Button>
+            <div className="flex gap-2 justify-center">
+              <Button variant="outline" onClick={() => setShowAddManual(true)}>
+                <FileUp className="h-4 w-4 mr-2" />
+                Adicionar banco manual
+              </Button>
+              <Button onClick={openWidget} disabled={connecting}>
+                <Plug2 className="h-4 w-4 mr-2" />
+                Conectar banco
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -156,9 +233,11 @@ export default function ConnectBankConnections() {
       {!loading && groups.map((group) => {
         const primary  = group[0];
         const itemId   = primary.pluggy_external_item_id;
+        const isManual = primary.provider === "manual";
         const isSyncing = syncing[itemId ?? "__all__"] || syncing["__all__"];
+        const isImporting = !!importingStatement[primary.id];
         const pluggyStatus = primary.pluggy_status ?? primary.status;
-        const isError = pluggyStatus === "login_error" || pluggyStatus === "error" || pluggyStatus === "outdated";
+        const isError = !isManual && (pluggyStatus === "login_error" || pluggyStatus === "error" || pluggyStatus === "outdated");
 
         return (
           <Card key={primary.pluggy_item_id ?? primary.id} className={isError ? "border-red-200" : ""}>
@@ -177,11 +256,26 @@ export default function ConnectBankConnections() {
                     </p>
                   </div>
                   <StatusBadge status={pluggyStatus} />
+                  {isManual && (
+                    <Badge variant="outline" className="text-xs">
+                      <FileUp className="h-3 w-3 mr-1" /> Importação manual
+                    </Badge>
+                  )}
                 </div>
 
                 {/* Ações do item */}
                 <div className="flex gap-2 flex-wrap">
-                  {isError ? (
+                  {isManual ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => triggerImport(primary.id)}
+                      disabled={isImporting}
+                    >
+                      <Upload className={`h-3.5 w-3.5 mr-1 ${isImporting ? "animate-pulse" : ""}`} />
+                      {isImporting ? "Importando..." : "Importar extrato"}
+                    </Button>
+                  ) : isError ? (
                     <Button
                       size="sm"
                       variant="outline"
@@ -344,6 +438,98 @@ export default function ConnectBankConnections() {
             <Button variant="outline" onClick={() => setConfirmDisconnect(null)}>Cancelar</Button>
             <Button variant="destructive" onClick={handleDisconnect}>
               Desconectar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: adicionar banco manual */}
+      <Dialog open={showAddManual} onOpenChange={setShowAddManual}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileUp className="h-4 w-4" />
+              Adicionar banco manual
+            </DialogTitle>
+            <DialogDescription>
+              Sem integração automática — você importa o extrato (OFX ou CSV) sempre que quiser atualizar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Nome do banco *</Label>
+              <Input value={manualBankName} onChange={(e) => setManualBankName(e.target.value)} placeholder="Ex: Banco do Brasil" className="h-10" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Agência</Label>
+                <Input value={manualAgency} onChange={(e) => setManualAgency(e.target.value)} placeholder="0001" className="h-10" />
+              </div>
+              <div className="space-y-1">
+                <Label>Conta *</Label>
+                <Input value={manualAccountNumber} onChange={(e) => setManualAccountNumber(e.target.value)} placeholder="12345-6" className="h-10" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Tipo de conta</Label>
+              <Select value={manualAccountType} onValueChange={setManualAccountType}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="checking">Conta Corrente</SelectItem>
+                  <SelectItem value="savings">Poupança</SelectItem>
+                  <SelectItem value="other">Outro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddManual(false)}>Cancelar</Button>
+            <Button onClick={handleCreateManual} disabled={creatingManual}>
+              {creatingManual ? "Adicionando..." : "Adicionar banco"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: preview do extrato antes de importar */}
+      <Dialog open={!!previewImport} onOpenChange={(o) => !o && setPreviewImport(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              Importar extrato — {previewImport?.connectionName}
+            </DialogTitle>
+            <DialogDescription>
+              {previewImport?.transactions.length} transação(ões) encontrada(s) no arquivo. Transações já
+              importadas anteriormente serão ignoradas automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+          {previewImport && (
+            <div className="max-h-72 overflow-y-auto rounded-md border divide-y text-sm">
+              {previewImport.transactions.slice(0, 50).map((t, i) => (
+                <div key={i} className="flex items-center justify-between px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate">{t.description}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(t.date + "T12:00:00").toLocaleDateString("pt-BR")} · {t.method}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 ml-2 font-medium ${t.type === "credit" ? "text-emerald-600" : "text-destructive"}`}>
+                    {t.type === "credit" ? "+" : "-"}{t.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                  </span>
+                </div>
+              ))}
+              {previewImport.transactions.length > 50 && (
+                <p className="px-3 py-2 text-xs text-muted-foreground">
+                  + {previewImport.transactions.length - 50} outra(s)...
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewImport(null)}>Cancelar</Button>
+            <Button onClick={confirmImport} disabled={!!previewImport && importingStatement[previewImport.connectionId]}>
+              Confirmar importação
             </Button>
           </DialogFooter>
         </DialogContent>
