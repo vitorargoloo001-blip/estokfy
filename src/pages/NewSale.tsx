@@ -34,6 +34,7 @@ const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'credit_card', label: 'Cartão Crédito' },
   { value: 'debit_card', label: 'Cartão Débito' },
   { value: 'transfer', label: 'Transferência' },
+  { value: 'credit', label: 'Crédito do Cliente' },
   { value: 'pending', label: 'A prazo / Pendente' },
 ];
 
@@ -61,6 +62,35 @@ export default function NewSale() {
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [searching, setSearching] = useState(false);
   const debouncedSearch = useDebouncedValue(productSearch, 300);
+  const [customerCredit, setCustomerCredit] = useState(0);
+
+  // Saldo de crédito disponível do cliente selecionado (fidelidade + devolução + troca).
+  useEffect(() => {
+    const resolvedId = customerId && customerId !== 'none' ? customerId : null;
+    if (!resolvedId || !storeId) { setCustomerCredit(0); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('loyalty_credits')
+        .select('amount_available')
+        .eq('store_id', storeId)
+        .eq('customer_id', resolvedId)
+        .in('status', ['available', 'partially_used']);
+      if (cancelled) return;
+      setCustomerCredit((data || []).reduce((s, c: any) => s + Number(c.amount_available || 0), 0));
+    })();
+    return () => { cancelled = true; };
+  }, [customerId, storeId]);
+
+  // Sem cliente (ou sem saldo), 'credit' não pode ser usado como pagamento —
+  // reverte qualquer linha de crédito para PIX antes de deixar órfã.
+  useEffect(() => {
+    if (customerCredit > 0) return;
+    setPayments(prev => {
+      if (!prev.some(p => p.method === 'credit')) return prev;
+      return prev.map(p => p.method === 'credit' ? { ...p, method: 'pix' } : p);
+    });
+  }, [customerCredit]);
 
   const fetchData = useCallback(async () => {
     if (!storeId) return;
@@ -275,6 +305,14 @@ export default function NewSale() {
     }
 
     const resolvedCustomerId = (!customerId || customerId === 'none') ? null : customerId;
+
+    const creditUsed = cleanPayments.filter(p => p.method === 'credit').reduce((s, p) => s + p.amount, 0);
+    if (creditUsed > 0 && !resolvedCustomerId) {
+      toast.error('Selecione um cliente para usar crédito como pagamento.'); return;
+    }
+    if (creditUsed > customerCredit + 0.01) {
+      toast.error(`Crédito insuficiente: disponível ${fmt(customerCredit)}, informado ${fmt(creditUsed)}.`); return;
+    }
 
     // V12: venda a prazo exige cliente vinculado (sem cliente, não há como cobrar depois)
     if (hasPending && !resolvedCustomerId) {
@@ -573,24 +611,41 @@ export default function NewSale() {
                 )}
               </div>
               <div className="space-y-2">
-                {payments.map((p, idx) => (
-                  <div key={idx} className="flex gap-2 items-center">
-                    <Select value={p.method} onValueChange={v => updatePayment(idx, 'method', v)}>
-                      <SelectTrigger className="h-10 flex-1"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {PAYMENT_METHODS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <Input type="number" step="0.01" min="0" value={p.amount}
-                      onChange={e => updatePayment(idx, 'amount', e.target.value)}
-                      className="h-10 w-28 text-right" />
-                    {payments.length > 1 && (
-                      <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" onClick={() => removePaymentLine(idx)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
+                {customerCredit > 0 && (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                    Crédito disponível do cliente: <strong>{fmt(customerCredit)}</strong>
+                  </p>
+                )}
+                {payments.map((p, idx) => {
+                  const methodOptions = p.method === 'credit' || customerCredit > 0
+                    ? PAYMENT_METHODS
+                    : PAYMENT_METHODS.filter(m => m.value !== 'credit');
+                  return (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <Select value={p.method} onValueChange={v => updatePayment(idx, 'method', v)}>
+                        <SelectTrigger className="h-10 flex-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {methodOptions.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Input type="number" step="0.01" min="0"
+                        max={p.method === 'credit' ? customerCredit : undefined}
+                        value={p.amount}
+                        onChange={e => updatePayment(idx, 'amount', e.target.value)}
+                        className="h-10 w-28 text-right" />
+                      {payments.length > 1 && (
+                        <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" onClick={() => removePaymentLine(idx)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+                {payments.some(p => p.method === 'credit' && p.amount > customerCredit + 0.01) && (
+                  <p className="text-xs text-destructive">
+                    Valor em crédito excede o disponível ({fmt(customerCredit)}).
+                  </p>
+                )}
                 <Button variant="outline" size="sm" className="w-full" onClick={addPaymentLine}>
                   <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar pagamento
                 </Button>

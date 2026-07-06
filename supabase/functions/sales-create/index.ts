@@ -129,6 +129,8 @@ Deno.serve(async (req) => {
       if (msg.includes("perfil_nao_encontrado")) return json({ error: "perfil_nao_encontrado", message: "Perfil não encontrado." }, 403);
       if (msg.includes("usuario_inativo")) return json({ error: "usuario_inativo", message: "Usuário inativo." }, 403);
       if (msg.includes("data_futura_invalida")) return json({ error: "data_futura_invalida", message: "Não é possível registrar uma venda em uma data futura." }, 400);
+      if (msg.includes("credito_insuficiente")) return json({ error: "credito_insuficiente", message: "O cliente não tem crédito suficiente para o valor informado." }, 400);
+      if (msg.includes("credito_sem_cliente")) return json({ error: "credito_sem_cliente", message: "Selecione um cliente para usar crédito como pagamento." }, 400);
       return json({ error: "internal_error", message: "Erro interno. Tente novamente." }, 500);
     }
 
