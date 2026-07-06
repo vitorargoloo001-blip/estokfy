@@ -46,6 +46,28 @@ Deno.serve(async (req) => {
   // Cliente service_role para operações privilegiadas
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+  // SECURITY: `isUserCall` above only checked that *some* Authorization header was present,
+  // not that it belongs to a real user who owns store_id. Because everything below runs on
+  // the service_role client (bypassing RLS), that gap would let anyone with the public anon
+  // key trigger automations — including data mutations like auto-reconciliation — against
+  // any other store. Resolve the caller's own profile and enforce store ownership for the
+  // non-cron path.
+  if (!isCron) {
+    const token = (authHeader ?? "").replace("Bearer ", "");
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("store_id, role")
+      .eq("auth_user_id", user.id)
+      .single();
+    if (!profile || profile.store_id !== store_id || ["sales", "stock"].includes(profile.role)) {
+      return json({ error: "Unauthorized" }, 403);
+    }
+  }
+
   // Buscar automação e validar store_id
   const { data: automation, error: autoErr } = await supabase
     .from("connect_automations")

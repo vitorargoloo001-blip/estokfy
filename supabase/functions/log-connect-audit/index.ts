@@ -1,8 +1,10 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+
 const supabase = createClient(
-  Deno.env.get("SUPABASE_URL") || "",
+  SUPABASE_URL,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
 );
 
@@ -32,6 +34,27 @@ serve(async (req: Request) => {
         JSON.stringify({ error: "Missing required fields" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
+    }
+
+    // SECURITY: verify the caller's own JWT resolves to the store_id/user_id it's trying to
+    // log under — otherwise anyone with the public anon key could forge audit entries for
+    // any store, defeating the purpose of the audit trail.
+    const token = (req.headers.get("authorization") ?? "").replace("Bearer ", "");
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user) {
+      return new Response(JSON.stringify({ error: "Não autorizado" }), {
+        status: 401, headers: { "Content-Type": "application/json" },
+      });
+    }
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, store_id")
+      .eq("auth_user_id", user.id)
+      .single();
+    if (!profile || profile.id !== user_id || profile.store_id !== store_id) {
+      return new Response(JSON.stringify({ error: "Não autorizado" }), {
+        status: 403, headers: { "Content-Type": "application/json" },
+      });
     }
 
     const { data, error } = await supabase.rpc("log_connect_audit", {
