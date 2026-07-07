@@ -11,6 +11,7 @@ import {
 import {
   AlertCircle, CheckCircle2, Clock, RefreshCw, Plug2, Building2,
   Trash2, RotateCcw, Wifi, WifiOff, Info, ExternalLink, ShieldCheck, Upload, FileUp,
+  Webhook, Copy, KeyRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePluggyConnection } from "@/hooks/usePluggyConnection";
@@ -57,6 +58,7 @@ export default function ConnectBankConnections() {
     connections, loading, syncing, connecting, error,
     loadConnections, openWidget, syncNow, reconnect, disconnect, removeManualConnection,
     createManualConnection, creatingManual, importStatement, importingStatement,
+    createItauDirectConnection, creatingItauDirect, getItauWebhookSecret, regenerateItauWebhookSecret,
   } = usePluggyConnection();
 
   const [confirmDisconnect, setConfirmDisconnect] = useState<{
@@ -82,6 +84,45 @@ export default function ConnectBankConnections() {
       setShowAddManual(false);
       setManualBankName(""); setManualAccountNumber(""); setManualAccountType("checking"); setManualAgency("");
     }
+  };
+
+  // ── Conectar Itaú direto (API PIX Recebimentos, sem agregador) ─────
+  const [showAddItau, setShowAddItau] = useState(false);
+  const [itauAccountNumber, setItauAccountNumber] = useState("");
+  const [itauAccountType, setItauAccountType] = useState("checking");
+  const [itauAgency, setItauAgency] = useState("");
+  const [webhookInfo, setWebhookInfo] = useState<{ connectionId: string; secret: string } | null>(null);
+
+  const webhookUrlFor = (secret: string) =>
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/itau-pix-webhook?token=${secret}`;
+
+  const handleCreateItauDirect = async () => {
+    if (!itauAccountNumber.trim()) {
+      toast.error("Informe o número da conta.");
+      return;
+    }
+    const result = await createItauDirectConnection(itauAccountNumber, itauAccountType, itauAgency);
+    if (result) {
+      setShowAddItau(false);
+      setItauAccountNumber(""); setItauAccountType("checking"); setItauAgency("");
+      setWebhookInfo({ connectionId: result.id, secret: result.webhook_secret });
+    }
+  };
+
+  const handleViewWebhook = async (connectionId: string) => {
+    const secret = await getItauWebhookSecret(connectionId);
+    if (secret) setWebhookInfo({ connectionId, secret });
+  };
+
+  const handleRegenerateWebhook = async () => {
+    if (!webhookInfo) return;
+    const secret = await regenerateItauWebhookSecret(webhookInfo.connectionId);
+    if (secret) setWebhookInfo({ connectionId: webhookInfo.connectionId, secret });
+  };
+
+  const copyWebhookUrl = (secret: string) => {
+    navigator.clipboard.writeText(webhookUrlFor(secret));
+    toast.success("URL copiada.");
   };
 
   // ── Importar extrato (OFX/CSV) ──────────────────────────────────────
@@ -156,6 +197,10 @@ export default function ConnectBankConnections() {
           <Button variant="outline" onClick={() => setShowAddManual(true)}>
             <FileUp className="h-4 w-4 mr-2" />
             Adicionar banco manual
+          </Button>
+          <Button variant="outline" onClick={() => setShowAddItau(true)}>
+            <Webhook className="h-4 w-4 mr-2" />
+            Conectar Itaú direto
           </Button>
           <Button onClick={openWidget} disabled={connecting}>
             {connecting
@@ -234,10 +279,11 @@ export default function ConnectBankConnections() {
         const primary  = group[0];
         const itemId   = primary.pluggy_external_item_id;
         const isManual = primary.provider === "manual";
+        const isItauDirect = primary.provider === "itau_direct";
         const isSyncing = syncing[itemId ?? "__all__"] || syncing["__all__"];
         const isImporting = !!importingStatement[primary.id];
         const pluggyStatus = primary.pluggy_status ?? primary.status;
-        const isError = !isManual && (pluggyStatus === "login_error" || pluggyStatus === "error" || pluggyStatus === "outdated");
+        const isError = !isManual && !isItauDirect && (pluggyStatus === "login_error" || pluggyStatus === "error" || pluggyStatus === "outdated");
 
         return (
           <Card key={primary.pluggy_item_id ?? primary.id} className={isError ? "border-red-200" : ""}>
@@ -261,6 +307,11 @@ export default function ConnectBankConnections() {
                       <FileUp className="h-3 w-3 mr-1" /> Importação manual
                     </Badge>
                   )}
+                  {isItauDirect && (
+                    <Badge variant="outline" className="text-xs">
+                      <Webhook className="h-3 w-3 mr-1" /> Itaú direto (webhook)
+                    </Badge>
+                  )}
                 </div>
 
                 {/* Ações do item */}
@@ -274,6 +325,15 @@ export default function ConnectBankConnections() {
                     >
                       <Upload className={`h-3.5 w-3.5 mr-1 ${isImporting ? "animate-pulse" : ""}`} />
                       {isImporting ? "Importando..." : "Importar extrato"}
+                    </Button>
+                  ) : isItauDirect ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleViewWebhook(primary.id)}
+                    >
+                      <KeyRound className="h-3.5 w-3.5 mr-1" />
+                      Ver webhook
                     </Button>
                   ) : isError ? (
                     <Button
@@ -487,6 +547,88 @@ export default function ConnectBankConnections() {
             <Button onClick={handleCreateManual} disabled={creatingManual}>
               {creatingManual ? "Adicionando..." : "Adicionar banco"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: conectar Itaú direto */}
+      <Dialog open={showAddItau} onOpenChange={setShowAddItau}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Webhook className="h-4 w-4" />
+              Conectar Itaú direto
+            </DialogTitle>
+            <DialogDescription>
+              Recebe PIX confirmado direto do Itaú via webhook, sem agregador terceiro. Precisa da API
+              PIX Recebimentos liberada pelo seu gerente Itaú PJ no devportal.itau.com.br.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Agência</Label>
+                <Input value={itauAgency} onChange={(e) => setItauAgency(e.target.value)} placeholder="0001" className="h-10" />
+              </div>
+              <div className="space-y-1">
+                <Label>Conta *</Label>
+                <Input value={itauAccountNumber} onChange={(e) => setItauAccountNumber(e.target.value)} placeholder="12345-6" className="h-10" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Tipo de conta</Label>
+              <Select value={itauAccountType} onValueChange={setItauAccountType}>
+                <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="checking">Conta Corrente</SelectItem>
+                  <SelectItem value="savings">Poupança</SelectItem>
+                  <SelectItem value="other">Outro</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddItau(false)}>Cancelar</Button>
+            <Button onClick={handleCreateItauDirect} disabled={creatingItauDirect}>
+              {creatingItauDirect ? "Criando..." : "Criar conexão"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: URL/token do webhook Itaú */}
+      <Dialog open={!!webhookInfo} onOpenChange={(o) => !o && setWebhookInfo(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4" />
+              Webhook do Itaú
+            </DialogTitle>
+            <DialogDescription>
+              Cole essa URL no campo de webhook da API PIX Recebimentos, no devportal.itau.com.br
+              (depois que seu gerente Itaú liberar o acesso). Cada PIX recebido cai aqui automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+          {webhookInfo && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
+                <code className="text-xs break-all flex-1">{webhookUrlFor(webhookInfo.secret)}</code>
+                <Button size="sm" variant="ghost" onClick={() => copyWebhookUrl(webhookInfo.secret)}>
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Se suspeitar que esse token vazou, regenere — mas lembre de atualizar a URL cadastrada
+                no devportal do Itaú também, senão o webhook antigo para de funcionar.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={handleRegenerateWebhook}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1" />
+              Regenerar token
+            </Button>
+            <Button onClick={() => setWebhookInfo(null)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

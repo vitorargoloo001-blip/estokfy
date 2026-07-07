@@ -518,6 +518,7 @@ export type Database = {
           total_transactions: number | null
           updated_at: string
           webhook_id: string | null
+          webhook_secret: string | null
           webhook_subscribed: boolean | null
         }
         Insert: {
@@ -551,6 +552,7 @@ export type Database = {
           total_transactions?: number | null
           updated_at?: string
           webhook_id?: string | null
+          webhook_secret?: string | null
           webhook_subscribed?: boolean | null
         }
         Update: {
@@ -584,6 +586,7 @@ export type Database = {
           total_transactions?: number | null
           updated_at?: string
           webhook_id?: string | null
+          webhook_secret?: string | null
           webhook_subscribed?: boolean | null
         }
         Relationships: [
@@ -5130,6 +5133,18 @@ export type Database = {
         }
         Returns: string
       }
+      create_itau_direct_connection: {
+        Args: {
+          p_account_number: string
+          p_account_type: string
+          p_agency?: string
+          p_store_id: string
+        }
+        Returns: {
+          id: string
+          webhook_secret: string
+        }[]
+      }
       create_manual_bank_connection: {
         Args: {
           p_account_number: string
@@ -5928,6 +5943,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_itau_webhook_secret: {
+        Args: { p_bank_connection_id: string }
+        Returns: string
+      }
       get_loyalty_settings: { Args: never; Returns: Json }
       get_loyalty_settings_for_store: {
         Args: { p_store_id: string }
@@ -6654,6 +6673,10 @@ export type Database = {
         }[]
       }
       refresh_store_notifications: { Args: never; Returns: Json }
+      regenerate_itau_webhook_secret: {
+        Args: { p_bank_connection_id: string }
+        Returns: string
+      }
       register_pluggy_item_auth: {
         Args: {
           p_accounts?: Json

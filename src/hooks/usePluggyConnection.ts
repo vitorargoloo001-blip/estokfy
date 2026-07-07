@@ -318,6 +318,62 @@ export function usePluggyConnection() {
     }
   }, [profile?.store_id, loadConnections]);
 
+  // ── Criar conexão Itaú direta (API PIX Recebimentos, sem agregador) ──
+  const [creatingItauDirect, setCreatingItauDirect] = useState(false);
+  const createItauDirectConnection = useCallback(async (
+    accountNumber: string,
+    accountType: string,
+    agency?: string
+  ) => {
+    if (!profile?.store_id) return null;
+    setCreatingItauDirect(true);
+    try {
+      const { data, error: err } = await supabase.rpc("create_itau_direct_connection", {
+        p_store_id: profile.store_id,
+        p_account_number: accountNumber,
+        p_account_type: accountType,
+        p_agency: agency || null,
+      });
+      if (err) throw err;
+      const row = Array.isArray(data) ? data[0] : data;
+      await loadConnections();
+      return row as { id: string; webhook_secret: string };
+    } catch (e) {
+      toast.error("Erro ao criar conexão Itaú: " + String(e));
+      return null;
+    } finally {
+      setCreatingItauDirect(false);
+    }
+  }, [profile?.store_id, loadConnections]);
+
+  // ── Consultar / rotacionar o token do webhook Itaú ────────────────
+  const getItauWebhookSecret = useCallback(async (bankConnectionId: string) => {
+    try {
+      const { data, error: err } = await supabase.rpc("get_itau_webhook_secret", {
+        p_bank_connection_id: bankConnectionId,
+      });
+      if (err) throw err;
+      return data as string | null;
+    } catch (e) {
+      toast.error("Erro ao consultar token: " + String(e));
+      return null;
+    }
+  }, []);
+
+  const regenerateItauWebhookSecret = useCallback(async (bankConnectionId: string) => {
+    try {
+      const { data, error: err } = await supabase.rpc("regenerate_itau_webhook_secret", {
+        p_bank_connection_id: bankConnectionId,
+      });
+      if (err) throw err;
+      toast.success("Token regenerado. Atualize a URL cadastrada no devportal do Itaú.");
+      return data as string;
+    } catch (e) {
+      toast.error("Erro ao regenerar token: " + String(e));
+      return null;
+    }
+  }, []);
+
   // ── Importar extrato (OFX/CSV) para uma conexão manual ────────────
   const [importingStatement, setImportingStatement] = useState<Record<string, boolean>>({});
   const importStatement = useCallback(async (
@@ -370,6 +426,10 @@ export function usePluggyConnection() {
     removeManualConnection,
     createManualConnection,
     creatingManual,
+    createItauDirectConnection,
+    creatingItauDirect,
+    getItauWebhookSecret,
+    regenerateItauWebhookSecret,
     importStatement,
     importingStatement,
     isReady: true,

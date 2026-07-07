@@ -2,7 +2,11 @@
 //
 // Recebe a notificação de PIX recebido direto do Itaú (API PIX Recebimentos,
 // devportal.itau.com.br), sem depender de agregador terceiro (Pluggy/Open
-// Finance). Alternativa mais "direta" pedida pelo usuário ao caminho Pluggy.
+// Finance). Multi-tenant: a loja/conexão é descoberta pelo próprio token da
+// URL (bank_connections.webhook_secret), gerado e exibido na tela de
+// Conexões (create_itau_direct_connection) — nenhuma env var por loja é
+// necessária, só SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY (globais, já
+// existentes em toda Edge Function).
 //
 // Formato do payload segue o padrão regulado pelo Bacen para webhooks de PIX
 // recebido (mesmo contrato usado por todos os PSPs, incluindo Itaú):
@@ -18,15 +22,8 @@
 // a validação de certificado cliente não é algo que uma Edge Function comum
 // consegue terminar sozinha — isso pode exigir um proxy/gateway na frente
 // (revisar quando o manual técnico do Itaú estiver em mãos). Como camada
-// mínima de defesa enquanto isso não é confirmado, exige um token compartilhado
-// (ITAU_WEBHOOK_TOKEN) que deve ser embutido na URL cadastrada no Itaú, ex:
-//   https://<PROJECT_REF>.supabase.co/functions/v1/itau-pix-webhook?token=...
-//
-// Env vars obrigatórias:
-//   ITAU_WEBHOOK_TOKEN            — token compartilhado (query param `token`)
-//   ITAU_TARGET_STORE_ID          — store_id da loja Estokfy dona da conta Itaú
-//   ITAU_TARGET_BANK_CONNECTION_ID — id em bank_connections representando essa conta
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// mínima de defesa enquanto isso não é confirmado, o token por conexão
+// (?token=<webhook_secret>) já funciona como bearer secret de posse.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -62,24 +59,31 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const expectedToken = Deno.env.get("ITAU_WEBHOOK_TOKEN");
-  const storeId = Deno.env.get("ITAU_TARGET_STORE_ID");
-  const bankConnectionId = Deno.env.get("ITAU_TARGET_BANK_CONNECTION_ID");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-
-  if (!expectedToken || !storeId || !bankConnectionId) {
-    console.error("[itau-pix-webhook] Variáveis de ambiente não configuradas (token/store/connection)");
-    return new Response(JSON.stringify({ error: "Integração Itaú não configurada" }), {
-      status: 503, headers: { ...CORS, "Content-Type": "application/json" },
-    });
-  }
+  const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", serviceKey);
 
   const url = new URL(req.url);
-  const providedToken = url.searchParams.get("token") ?? req.headers.get("x-itau-webhook-token");
-  if (providedToken !== expectedToken) {
-    console.warn("[itau-pix-webhook] Token ausente ou inválido — rejeitando");
+  const token = url.searchParams.get("token") ?? req.headers.get("x-itau-webhook-token");
+  if (!token) {
+    console.warn("[itau-pix-webhook] Token ausente — rejeitando");
     return new Response("Unauthorized", { status: 401, headers: CORS });
   }
+
+  const { data: conn, error: connErr } = await supabase
+    .from("bank_connections")
+    .select("id, store_id")
+    .eq("webhook_secret", token)
+    .eq("provider", "itau_direct")
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (connErr || !conn) {
+    console.warn("[itau-pix-webhook] Token não corresponde a nenhuma conexão ativa");
+    return new Response("Unauthorized", { status: 401, headers: CORS });
+  }
+
+  const storeId = conn.store_id as string;
+  const bankConnectionId = conn.id as string;
 
   const rawBody = await req.text();
   let payload: unknown;
@@ -89,7 +93,7 @@ Deno.serve(async (req: Request) => {
     return new Response("Invalid JSON", { status: 400, headers: CORS });
   }
 
-  console.log(`[itau-pix-webhook] payload recebido: ${rawBody.slice(0, 500)}`);
+  console.log(`[itau-pix-webhook] store=${storeId} payload recebido: ${rawBody.slice(0, 500)}`);
 
   const events = extractPixEvents(payload);
   if (events.length === 0) {
@@ -98,8 +102,6 @@ Deno.serve(async (req: Request) => {
       headers: { ...CORS, "Content-Type": "application/json" },
     });
   }
-
-  const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", serviceKey);
 
   let processed = 0;
   let newCount = 0;
@@ -147,7 +149,12 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  console.log(`[itau-pix-webhook] processados=${processed} novos=${newCount}`);
+  await supabase
+    .from("bank_connections")
+    .update({ last_sync_at: new Date().toISOString(), last_sync_status: "success" })
+    .eq("id", bankConnectionId);
+
+  console.log(`[itau-pix-webhook] store=${storeId} processados=${processed} novos=${newCount}`);
 
   return new Response(JSON.stringify({ received: true, processed, new: newCount, matchResult }), {
     headers: { ...CORS, "Content-Type": "application/json" },
