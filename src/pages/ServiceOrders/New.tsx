@@ -13,6 +13,7 @@ import { CustomerSearch } from '@/components/CustomerSearch';
 import { toast } from 'sonner';
 import { useBusinessLabels } from '@/hooks/useBusinessLabels';
 import { useExtendedCustomerProfile } from '@/hooks/useExtendedCustomerProfile';
+import { useOsPaymentTerms } from '@/hooks/useOsPaymentTerms';
 
 interface EquipmentRow {
   device: string;
@@ -34,6 +35,7 @@ export default function NewServiceOrder() {
   const navigate = useNavigate();
   const { labels } = useBusinessLabels();
   const { enabled: extendedProfile } = useExtendedCustomerProfile();
+  const { enabled: paymentTermsEnabled } = useOsPaymentTerms();
   const [saving, setSaving] = useState(false);
   const [techs, setTechs] = useState<{ id: string; full_name: string | null; role: string }[]>([]);
   const [isPro, setIsPro] = useState(false);
@@ -53,6 +55,7 @@ export default function NewServiceOrder() {
     customer_zip_code: '',
     reported_issue: '',
     internal_notes: '',
+    payment_terms: '',
     priority: 'normal',
     technician_profile_id: '',
     estimated_delivery: '',
@@ -123,6 +126,7 @@ export default function NewServiceOrder() {
         accessories: mainEquip.accessories,
         reported_issue: form.reported_issue,
         internal_notes: form.internal_notes,
+        ...(paymentTermsEnabled ? { payment_terms: form.payment_terms || null } : {}),
         priority: form.priority,
         technician_profile_id: form.technician_profile_id || null,
         estimated_delivery: form.estimated_delivery || null,
@@ -277,6 +281,11 @@ export default function NewServiceOrder() {
         <h2 className="font-semibold">Solicitação</h2>
         <Field label={`${labels.defect} *`}><Textarea rows={3} value={form.reported_issue} onChange={e => update('reported_issue', e.target.value)} /></Field>
         <Field label="Observações internas"><Textarea rows={2} value={form.internal_notes} onChange={e => update('internal_notes', e.target.value)} /></Field>
+        {paymentTermsEnabled && (
+          <Field label="Condições de pagamento">
+            <Textarea rows={2} value={form.payment_terms} onChange={e => update('payment_terms', e.target.value)} placeholder="Ex: 50% de entrada, saldo na entrega..." />
+          </Field>
+        )}
       </Card>
 
       {/* VALOR DO SERVIÇO */}

@@ -30,6 +30,8 @@ interface SOPdfPayload {
     imei_serial?: string | null;
     device_condition?: string | null;
     reported_issue: string;
+    internal_notes?: string | null;
+    payment_terms?: string | null;
     accessories?: string | null;
     status: ServiceOrderStatus;
     entry_date: string;
@@ -173,14 +175,15 @@ export function generateServiceOrderPDF(p: SOPdfPayload): jsPDF {
   });
   y += 3;
 
-  // ── DEFEITO / SOLICITAÇÃO ─────────────────────────────────
+  // ── SOLICITAÇÃO (defeito, obs. interna, entrada, técnico, condições de pagamento) ──
   y = checkPage(doc, y, 20);
-  y = sectionTitle(doc, 'Defeito relatado / Solicitação', y);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  const issueLines = doc.splitTextToSize(p.os.reported_issue, CONTENT_W);
-  doc.text(issueLines, MARGIN, y);
-  y += issueLines.length * 4 + 5;
+  y = sectionTitle(doc, 'Solicitação', y);
+  y = infoRow(doc, 'Defeito', p.os.reported_issue, y);
+  if (p.os.internal_notes) y = infoRow(doc, 'Obs. interna', p.os.internal_notes, y);
+  y = infoRow(doc, 'Entrada', new Date(p.os.entry_date).toLocaleString('pt-BR'), y);
+  if (p.technicianName) y = infoRow(doc, 'Técnico', p.technicianName, y);
+  if (p.os.payment_terms) y = infoRow(doc, 'Condições de pagamento', p.os.payment_terms, y);
+  y += 3;
 
   // ── SERVIÇOS EXECUTADOS ───────────────────────────────────
   if (p.os.executed_services_notes) {
@@ -309,16 +312,6 @@ export function generateServiceOrderPDF(p: SOPdfPayload): jsPDF {
     doc.text(termLines, MARGIN, y);
     doc.setTextColor(0, 0, 0);
     y += termLines.length * 3.5 + 5;
-  }
-
-  // ── TÉCNICO ──────────────────────────────────────────────
-  if (p.technicianName) {
-    y = checkPage(doc, y, 8);
-    y = sectionTitle(doc, 'Técnico responsável', y);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    doc.text(p.technicianName, MARGIN, y);
-    y += 7;
   }
 
   // ── ASSINATURAS ──────────────────────────────────────────

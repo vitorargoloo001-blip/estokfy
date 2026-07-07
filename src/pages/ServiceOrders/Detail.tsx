@@ -195,6 +195,7 @@ export default function ServiceOrderDetail() {
             {os.estimated_delivery && <Info label="Previsão" value={new Date(os.estimated_delivery).toLocaleDateString('pt-BR')} />}
             {os.delivered_at && <Info label="Entregue em" value={new Date(os.delivered_at).toLocaleString('pt-BR')} />}
             {techName && <Info label="Técnico" value={techName} />}
+            {os.payment_terms && <Info label="Condições de pagamento" value={os.payment_terms} />}
           </Card>
 
           <Card className="p-4">

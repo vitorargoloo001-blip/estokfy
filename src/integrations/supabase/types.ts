@@ -4205,6 +4205,7 @@ export type Database = {
           other_costs_desc: string | null
           paid_amount: number
           parts_amount: number
+          payment_terms: string | null
           pending_amount: number
           priority: string
           reported_issue: string
@@ -4258,6 +4259,7 @@ export type Database = {
           other_costs_desc?: string | null
           paid_amount?: number
           parts_amount?: number
+          payment_terms?: string | null
           pending_amount?: number
           priority?: string
           reported_issue: string
@@ -4311,6 +4313,7 @@ export type Database = {
           other_costs_desc?: string | null
           paid_amount?: number
           parts_amount?: number
+          payment_terms?: string | null
           pending_amount?: number
           priority?: string
           reported_issue?: string
@@ -6767,6 +6770,10 @@ export type Database = {
         Args: { p_enabled: boolean; p_store_id: string }
         Returns: undefined
       }
+      set_os_payment_terms_flag: {
+        Args: { p_enabled: boolean; p_store_id: string }
+        Returns: undefined
+      }
       set_store_business_type: {
         Args: { p_business_type: string; p_store_id: string }
         Returns: undefined
@@ -7236,4 +7243,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-{"_tag":"Error","error":{"code":"UnknownError","message":"Timeout while shutting down PostHog. Some events may not have been sent."}}
