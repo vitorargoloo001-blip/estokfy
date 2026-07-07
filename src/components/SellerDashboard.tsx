@@ -11,7 +11,9 @@ interface SellerStats {
   today_sales_count: number;
   today_sales_total: number;
   today_pix_count: number;
+  today_pix_total: number;
   today_cash_count: number;
+  today_cash_total: number;
   month_sales_count: number;
   month_sales_total: number;
   avg_ticket: number;
@@ -53,8 +55,8 @@ export default function SellerDashboard() {
 
   const cards = [
     { title: 'Minhas Vendas Hoje', value: stats?.today_sales_count?.toString() || '0', sub: fmt(stats?.today_sales_total || 0), icon: ShoppingCart, iconBg: 'bg-primary/10 text-primary' },
-    { title: 'Vendas PIX Hoje', value: stats?.today_pix_count?.toString() || '0', sub: 'transações no PIX hoje', icon: QrCode, iconBg: 'bg-teal-500/10 text-teal-600 dark:text-teal-400' },
-    { title: 'Vendas Dinheiro Hoje', value: stats?.today_cash_count?.toString() || '0', sub: 'transações em dinheiro hoje', icon: Banknote, iconBg: 'bg-lime-500/10 text-lime-600 dark:text-lime-400' },
+    { title: 'Vendas PIX Hoje', value: stats?.today_pix_count?.toString() || '0', sub: fmt(stats?.today_pix_total || 0), icon: QrCode, iconBg: 'bg-teal-500/10 text-teal-600 dark:text-teal-400' },
+    { title: 'Vendas Dinheiro Hoje', value: stats?.today_cash_count?.toString() || '0', sub: fmt(stats?.today_cash_total || 0), icon: Banknote, iconBg: 'bg-lime-500/10 text-lime-600 dark:text-lime-400' },
     { title: 'Minhas Vendas no Mês', value: stats?.month_sales_count?.toString() || '0', sub: fmt(stats?.month_sales_total || 0), icon: Receipt, iconBg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
     { title: 'Ticket Médio', value: fmt(stats?.avg_ticket || 0), sub: 'média das minhas vendas', icon: Receipt, iconBg: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
     { title: 'Clientes Atendidos', value: stats?.customers_served?.toString() || '0', sub: 'clientes distintos no mês', icon: Users, iconBg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
