@@ -22,6 +22,7 @@ import { ShimmerList } from '@/components/ShimmerSkeleton';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import EmployeeFilter from '@/components/EmployeeFilter';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useConnectModuleAccess } from '@/hooks/useConnectModuleAccess';
 
 const PAGE_SIZE = 20;
 
@@ -42,6 +43,7 @@ export default function Sales() {
   const [sellerId, setSellerId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const { canManageEmployees } = usePermissions();
+  const { canAccess: hasConnectAccess } = useConnectModuleAccess();
 
   useEffect(() => {
     if (!profile) return;
@@ -54,7 +56,7 @@ export default function Sales() {
     if (!profile) return;
     setLoading(true);
     const showRefunded = status === 'refunded';
-    let query = supabase.from('sales').select('*, customers(name), profiles!sales_created_by_fkey(full_name), payments(method, amount)', { count: 'exact' }).eq('store_id', profile.store_id);
+    let query = supabase.from('sales').select('*, customers(name), profiles!sales_created_by_fkey(full_name), payments(method, amount, reconciliation_matches(status, confidence_score))', { count: 'exact' }).eq('store_id', profile.store_id);
     if (!showRefunded) query = query.is('deleted_at', null);
     if (dateFrom) query = query.gte('created_at', dateFrom);
     if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59');
@@ -90,6 +92,20 @@ export default function Sales() {
     if (!ps.length) return '—';
     const top = [...ps].sort((a, b) => Number(b.amount) - Number(a.amount))[0];
     return PM_LABEL[top.method] || top.method;
+  };
+
+  const BANK_VERIFIABLE_METHODS = ['pix', 'card', 'credit_card', 'debit_card'];
+  const bankStatusBadge = (s: any): { label: string; cls: string } | null => {
+    if (!hasConnectAccess) return null;
+    type PaymentRow = { method: string; reconciliation_matches?: Array<{ status: string; confidence_score: number }> };
+    const payments = (s.payments || []) as PaymentRow[];
+    const verifiable = payments.filter(p => BANK_VERIFIABLE_METHODS.includes(p.method));
+    if (!verifiable.length) return null;
+
+    const statuses = verifiable.map(p => (p.reconciliation_matches || [])[0]?.status ?? 'awaiting');
+    if (statuses.includes('disputed')) return { label: 'Divergente', cls: 'bg-destructive/15 text-destructive' };
+    if (statuses.every(st => st === 'confirmed')) return { label: 'Confirmado pelo banco', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' };
+    return { label: 'Aguardando banco', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' };
   };
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -235,6 +251,7 @@ export default function Sales() {
         <div className="space-y-3">
           {sales.map((s) => {
             const ps = paymentStatusBadge(s);
+            const bankBadge = bankStatusBadge(s);
             const canSettle = s.payment_status === 'pending' || s.payment_status === 'partial';
             return (
               <Card key={s.id} className="cursor-pointer active:bg-muted/30" onClick={() => openDetail(s.id)}>
@@ -253,7 +270,12 @@ export default function Sales() {
                         <p className="text-xs text-amber-600 dark:text-amber-400">A receber: {fmt(s.amount_pending)}</p>
                       )}
                     </div>
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{primaryPayment(s)}</Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{primaryPayment(s)}</Badge>
+                      {bankBadge && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${bankBadge.cls}`}>{bankBadge.label}</span>
+                      )}
+                    </div>
                   </div>
                   {(canSettle || canEditSales || canDeleteSales) && (
                     <div className="flex gap-2 mt-2">
@@ -300,6 +322,7 @@ export default function Sales() {
               <TableBody>
                 {sales.map((s) => {
                   const ps = paymentStatusBadge(s);
+                  const bankBadge = bankStatusBadge(s);
                   const canSettle = s.payment_status === 'pending' || s.payment_status === 'partial';
                   return (
                     <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openDetail(s.id)}>
@@ -315,7 +338,14 @@ export default function Sales() {
                         )}
                       </TableCell>
                       <TableCell className="text-right text-sm hidden md:table-cell">{fmt(s.profit_gross)}</TableCell>
-                      <TableCell className="text-sm hidden md:table-cell"><Badge variant="secondary" className="text-xs">{primaryPayment(s)}</Badge></TableCell>
+                      <TableCell className="text-sm hidden md:table-cell">
+                        <div className="flex flex-col items-start gap-1">
+                          <Badge variant="secondary" className="text-xs">{primaryPayment(s)}</Badge>
+                          {bankBadge && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${bankBadge.cls}`}>{bankBadge.label}</span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-center">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ps.cls}`}>{ps.label}</span>
                       </TableCell>

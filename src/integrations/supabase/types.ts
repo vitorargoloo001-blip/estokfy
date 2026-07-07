@@ -3331,6 +3331,7 @@ export type Database = {
           match_reason: string | null
           match_type: string
           notes: string | null
+          payment_id: string | null
           sale_id: string | null
           status: string
           store_id: string
@@ -3348,6 +3349,7 @@ export type Database = {
           match_reason?: string | null
           match_type: string
           notes?: string | null
+          payment_id?: string | null
           sale_id?: string | null
           status?: string
           store_id: string
@@ -3365,6 +3367,7 @@ export type Database = {
           match_reason?: string | null
           match_type?: string
           notes?: string | null
+          payment_id?: string | null
           sale_id?: string | null
           status?: string
           store_id?: string
@@ -3383,6 +3386,13 @@ export type Database = {
             columns: ["confirmed_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_matches_payment_id_fkey"
+            columns: ["payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
             referencedColumns: ["id"]
           },
           {
@@ -4827,6 +4837,10 @@ export type Database = {
     }
     Functions: {
       _ai_query_question_text: { Args: { p_key: string }; Returns: string }
+      _connect_run_matching_core: {
+        Args: { p_store_id: string }
+        Returns: Json
+      }
       _has_automation_permission: {
         Args: { p_store_id: string }
         Returns: boolean
@@ -5015,6 +5029,7 @@ export type Database = {
         }[]
       }
       connect_clear_demo_data: { Args: { p_store_id: string }; Returns: Json }
+      connect_cron_tick: { Args: never; Returns: Json }
       connect_get_dashboard_kpis: {
         Args: { p_store_id: string }
         Returns: Json
@@ -6063,6 +6078,8 @@ export type Database = {
           date_difference_days: number
           id: string
           match_type: string
+          payment_id: string
+          payment_method: string
           sale_amount: number
           sale_date: string
           sale_number: string
