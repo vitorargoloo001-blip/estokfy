@@ -2,16 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Trophy, Search, Gift, Target, RefreshCw, Wallet, Sparkles, TrendingUp, ArrowDownCircle, UserCheck, AlertTriangle } from 'lucide-react';
+import { Trophy, Search, Gift, Target, RefreshCw, Wallet, Sparkles, TrendingUp, ArrowDownCircle, UserCheck, AlertTriangle, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { LoyaltyRankingItem } from '@/hooks/useLoyalty';
 import Customer360Dialog from '@/components/Customer360Dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { useAuth } from '@/contexts/AuthContext';
+import { useStoreSettings } from '@/hooks/useStoreSettings';
 
 const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -26,6 +30,10 @@ const STATUS_LABEL: Record<LoyaltyRankingItem['status'], { label: string; varian
 interface MonthlyTotals { generated_amount: number; generated_count: number; used_amount: number; used_customers: number; }
 
 export default function LoyaltyPage() {
+  const { profile } = useAuth();
+  const canEditSettings = ['owner', 'admin'].includes(profile?.role || '');
+  const { settings, saving: savingSettings, update: updateSetting, save: saveSettings } = useStoreSettings('loyalty');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [rows, setRows] = useState<LoyaltyRankingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -142,10 +150,18 @@ export default function LoyaltyPage() {
             A cada {fmt(goal)} em compras pagas, o cliente ganha {fmt(credit)} de crédito.
           </p>
         </div>
-        <Button onClick={openRecalcPreview} disabled={recalculating || previewLoading} variant="outline" size="sm">
-          <RefreshCw className={`h-4 w-4 mr-2 ${recalculating ? 'animate-spin' : ''}`} />
-          Recalcular
-        </Button>
+        <div className="flex gap-2">
+          {canEditSettings && (
+            <Button onClick={() => setSettingsOpen(true)} variant="outline" size="sm">
+              <Settings2 className="h-4 w-4 mr-2" />
+              Configurar meta e bonificação
+            </Button>
+          )}
+          <Button onClick={openRecalcPreview} disabled={recalculating || previewLoading} variant="outline" size="sm">
+            <RefreshCw className={`h-4 w-4 mr-2 ${recalculating ? 'animate-spin' : ''}`} />
+            Recalcular
+          </Button>
+        </div>
       </div>
 
       {/* ===== KPIs operacionais ===== */}
@@ -278,6 +294,66 @@ export default function LoyaltyPage() {
       </Card>
 
       <Customer360Dialog customerId={openCustomerId} open={!!openCustomerId} onOpenChange={(v) => !v && setOpenCustomerId(null)} />
+
+      {/* ===== Diálogo: configurar meta e bonificação ===== */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings2 className="h-4 w-4" />
+              Meta e bonificação de créditos
+            </DialogTitle>
+            <DialogDescription>
+              A cada valor da meta em compras pagas, o cliente ganha o valor da bonificação em crédito.
+              Vendas já registradas não mudam sozinhas — use "Recalcular" depois se quiser aplicar
+              retroativamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Meta de compras (R$)</Label>
+              <Input
+                type="number"
+                min={1}
+                step="0.01"
+                value={settings.goal_amount ?? 1000}
+                onChange={(e) => updateSetting('goal_amount', Number(e.target.value))}
+                className="h-10"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Valor da bonificação (R$)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={settings.credit_amount ?? 80}
+                onChange={(e) => updateSetting('credit_amount', Number(e.target.value))}
+                className="h-10"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettingsOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={async () => {
+                const goalOk = Number(settings.goal_amount ?? 1000) > 0;
+                const creditOk = Number(settings.credit_amount ?? 80) >= 0;
+                if (!goalOk || !creditOk) {
+                  toast.error('A meta precisa ser maior que zero e a bonificação não pode ser negativa.');
+                  return;
+                }
+                await saveSettings();
+                setSettingsOpen(false);
+                await load();
+              }}
+              disabled={savingSettings}
+            >
+              {savingSettings ? 'Salvando...' : 'Salvar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ===== Diálogo de confirmação do recálculo ===== */}
       <AlertDialog open={previewOpen} onOpenChange={setPreviewOpen}>
