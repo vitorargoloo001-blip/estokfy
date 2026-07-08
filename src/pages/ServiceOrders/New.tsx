@@ -14,6 +14,15 @@ import { toast } from 'sonner';
 import { useBusinessLabels } from '@/hooks/useBusinessLabels';
 import { useExtendedCustomerProfile } from '@/hooks/useExtendedCustomerProfile';
 import { useOsPaymentTerms } from '@/hooks/useOsPaymentTerms';
+import { formatBRL } from '@/lib/serviceOrderStatus';
+
+interface PartRow {
+  product_id: string;
+  name: string;
+  qty: number;
+  unit_price: number;
+  max_stock: number;
+}
 
 interface EquipmentRow {
   device: string;
@@ -41,6 +50,13 @@ export default function NewServiceOrder() {
   const [isPro, setIsPro] = useState(false);
   const [equipments, setEquipments] = useState<EquipmentRow[]>([blankEquip()]);
   const [showExtraCosts, setShowExtraCosts] = useState(false);
+
+  const [products, setProducts] = useState<any[]>([]);
+  const [parts, setParts] = useState<PartRow[]>([]);
+  const [partSearch, setPartSearch] = useState('');
+  const [pickingProductId, setPickingProductId] = useState('');
+  const [pickQty, setPickQty] = useState('1');
+  const [pickPrice, setPickPrice] = useState('');
 
   const [form, setForm] = useState({
     customer_id: '' as string | null,
@@ -82,6 +98,37 @@ export default function NewServiceOrder() {
       setTechs((data || []) as any);
     })();
   }, [profile?.store_id]);
+
+  useEffect(() => {
+    if (!profile?.store_id) return;
+    (async () => {
+      const { data } = await supabase.from('products')
+        .select('id, name, brand, model, sale_price, on_hand')
+        .eq('store_id', profile.store_id).eq('is_active', true).gt('on_hand', 0)
+        .order('name').limit(200);
+      setProducts(data || []);
+    })();
+  }, [profile?.store_id]);
+
+  const filteredProducts = products.filter(p =>
+    !partSearch || `${p.name} ${p.brand || ''} ${p.model || ''}`.toLowerCase().includes(partSearch.toLowerCase())
+  );
+  const pickingProduct = products.find(p => p.id === pickingProductId);
+
+  const addPart = () => {
+    if (!pickingProduct) return;
+    const qty = parseInt(pickQty) || 1;
+    const unit_price = Number(pickPrice) || 0;
+    setParts(prev => [...prev, {
+      product_id: pickingProduct.id, name: pickingProduct.name, qty, unit_price,
+      max_stock: pickingProduct.on_hand,
+    }]);
+    setPickingProductId(''); setPickQty('1'); setPickPrice(''); setPartSearch('');
+  };
+
+  const removePart = (idx: number) => setParts(prev => prev.filter((_, i) => i !== idx));
+
+  const partsTotal = parts.reduce((s, p) => s + p.qty * p.unit_price, 0);
 
   const update = (k: keyof typeof form, v: any) => setForm(p => ({ ...p, [k]: v }));
 
@@ -151,6 +198,12 @@ export default function NewServiceOrder() {
           p_description: form.service_description.trim() || 'Serviço',
           p_qty: 1,
           p_unit_price: val,
+        });
+      }
+
+      for (const p of parts) {
+        await (supabase as any).rpc('so_add_part', {
+          p_os: osId, p_product: p.product_id, p_qty: p.qty, p_unit_price: p.unit_price,
         });
       }
 
@@ -299,7 +352,61 @@ export default function NewServiceOrder() {
             <Input type="number" step="0.01" min="0" value={form.service_value} onChange={e => update('service_value', e.target.value)} placeholder="0,00" />
           </Field>
         </div>
-        <p className="text-xs text-muted-foreground">Peças podem ser adicionadas depois de criar a OS.</p>
+
+        <div className="pt-2 border-t space-y-3">
+          <h3 className="text-sm font-medium">Peças utilizadas</h3>
+
+          {parts.length > 0 && (
+            <div className="space-y-2">
+              {parts.map((p, idx) => (
+                <div key={idx} className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{p.name}</p>
+                    <p className="text-xs text-muted-foreground">{p.qty} × {formatBRL(p.unit_price)}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-medium">{formatBRL(p.qty * p.unit_price)}</span>
+                    <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => removePart(idx)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <p className="text-sm text-right text-muted-foreground">Total peças: <span className="font-semibold text-foreground">{formatBRL(partsTotal)}</span></p>
+            </div>
+          )}
+
+          <Input placeholder="Buscar peça no estoque..." value={partSearch} onChange={e => setPartSearch(e.target.value)} />
+          {partSearch && (
+            <div className="max-h-40 overflow-y-auto border rounded">
+              {filteredProducts.slice(0, 30).map(p => (
+                <button key={p.id} type="button"
+                  onClick={() => { setPickingProductId(p.id); setPickPrice(String(p.sale_price || '')); }}
+                  className={`w-full text-left p-2 hover:bg-muted border-b text-sm ${pickingProductId === p.id ? 'bg-primary/10' : ''}`}>
+                  <div className="flex justify-between">
+                    <span>{p.name} {p.brand} {p.model}</span>
+                    <span className="text-xs">Estoque: {p.on_hand} • {formatBRL(p.sale_price)}</span>
+                  </div>
+                </button>
+              ))}
+              {filteredProducts.length === 0 && (
+                <p className="p-2 text-xs text-muted-foreground">Nenhuma peça encontrada no estoque.</p>
+              )}
+            </div>
+          )}
+          {pickingProduct && (
+            <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+              <Field label={`Quantidade (máx. ${pickingProduct.on_hand})`}>
+                <Input type="number" min="1" max={pickingProduct.on_hand} value={pickQty} onChange={e => setPickQty(e.target.value)} />
+              </Field>
+              <Field label="Valor unitário (R$)">
+                <Input type="number" step="0.01" min="0" value={pickPrice} onChange={e => setPickPrice(e.target.value)} />
+              </Field>
+              <Button type="button" onClick={addPart}><Plus className="h-4 w-4 mr-1" />Adicionar</Button>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">O estoque é baixado ao criar a OS.</p>
+        </div>
       </Card>
 
       {/* CUSTOS EXTRAS (PRO) */}
