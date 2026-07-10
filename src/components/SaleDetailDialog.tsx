@@ -1,19 +1,25 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Package, CreditCard, Truck, Clock, CheckCircle2, AlertCircle, StickyNote } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Package, CreditCard, Truck, Clock, CheckCircle2, AlertCircle, StickyNote, Undo2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 import ReceiptActions from './ReceiptActions';
 
 interface SaleDetailDialogProps {
   saleId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSettled?: () => void;
 }
 
 interface SaleItem {
@@ -73,17 +79,18 @@ const deliveryStatusLabels: Record<string, { label: string; cls: string }> = {
   cancelled: { label: 'Cancelado', cls: 'bg-destructive/10 text-destructive' },
 };
 
-export default function SaleDetailDialog({ saleId, open, onOpenChange }: SaleDetailDialogProps) {
+export default function SaleDetailDialog({ saleId, open, onOpenChange, onSettled }: SaleDetailDialogProps) {
+  const { profile } = useAuth();
+  const canRevertPayment = ['owner', 'admin', 'manager'].includes(profile?.role || '');
   const [items, setItems] = useState<SaleItem[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [sale, setSale] = useState<SaleSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (!saleId || !open) return;
+  const load = () => {
+    if (!saleId) return;
     setLoading(true);
-
     Promise.all([
       supabase.from('sale_items').select('*, products(name)').eq('sale_id', saleId),
       supabase.from('payments').select('*').eq('sale_id', saleId).order('paid_at'),
@@ -96,7 +103,41 @@ export default function SaleDetailDialog({ saleId, open, onOpenChange }: SaleDet
       setSale((saleRes.data || null) as SaleSummary | null);
       setLoading(false);
     });
+  };
+
+  useEffect(() => {
+    if (!saleId || !open) return;
+    load();
   }, [saleId, open]);
+
+  const [revertTarget, setRevertTarget] = useState<Payment | null>(null);
+  const [revertReason, setRevertReason] = useState('');
+  const [reverting, setReverting] = useState(false);
+
+  const handleRevert = async () => {
+    if (!revertTarget) return;
+    if (revertReason.trim().length < 3) {
+      toast.error('Informe o motivo do estorno (mínimo 3 caracteres).');
+      return;
+    }
+    setReverting(true);
+    try {
+      const { error } = await supabase.rpc('revert_sale_payment', {
+        p_payment_id: revertTarget.id,
+        p_reason: revertReason.trim(),
+      });
+      if (error) throw error;
+      toast.success('Pagamento estornado.');
+      setRevertTarget(null);
+      setRevertReason('');
+      load();
+      onSettled?.();
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao estornar pagamento');
+    } finally {
+      setReverting(false);
+    }
+  };
 
   const today = new Date().toISOString().slice(0, 10);
   const isOverdue = sale?.due_date && sale.due_date < today && (sale.payment_status === 'pending' || sale.payment_status === 'partial');
@@ -211,11 +252,24 @@ export default function SaleDetailDialog({ saleId, open, onOpenChange }: SaleDet
                       <span className="text-sm font-medium">{methodLabels[p.method] || p.method}</span>
                       {p.provider && <span className="text-xs text-muted-foreground ml-2">({p.provider})</span>}
                     </div>
-                    <div className="text-right">
-                      <span className="text-sm font-semibold">{fmt(p.amount)}</span>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(p.paid_at).toLocaleString('pt-BR')}
-                      </p>
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <span className="text-sm font-semibold">{fmt(p.amount)}</span>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(p.paid_at).toLocaleString('pt-BR')}
+                        </p>
+                      </div>
+                      {canRevertPayment && p.method !== 'pending' && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                          onClick={() => { setRevertTarget(p); setRevertReason(''); }}
+                          title="Estornar este pagamento"
+                        >
+                          <Undo2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -275,6 +329,38 @@ export default function SaleDetailDialog({ saleId, open, onOpenChange }: SaleDet
           </div>
         )}
       </DialogContent>
+
+      {/* Confirmar estorno de pagamento */}
+      <Dialog open={!!revertTarget} onOpenChange={(o) => !o && setRevertTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Undo2 className="h-4 w-4 text-destructive" />
+              Estornar pagamento
+            </DialogTitle>
+            <DialogDescription>
+              Vai remover o pagamento de {revertTarget && fmt(revertTarget.amount)} ({methodLabels[revertTarget?.method || ''] || revertTarget?.method}),
+              o lançamento de caixa correspondente, e devolver esse valor para pendente na venda.
+              Outros pagamentos da venda não são afetados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Motivo do estorno *</Label>
+            <Textarea
+              rows={2}
+              value={revertReason}
+              onChange={(e) => setRevertReason(e.target.value)}
+              placeholder="Ex: lançado o valor total por engano, cliente pagou só o parcial"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevertTarget(null)} disabled={reverting}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleRevert} disabled={reverting}>
+              {reverting ? 'Estornando...' : 'Estornar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

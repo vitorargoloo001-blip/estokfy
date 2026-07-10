@@ -388,7 +388,7 @@ export default function Sales() {
         </div>
       )}
 
-      <SaleDetailDialog saleId={selectedSaleId} open={detailOpen} onOpenChange={setDetailOpen} />
+      <SaleDetailDialog saleId={selectedSaleId} open={detailOpen} onOpenChange={setDetailOpen} onSettled={fetchSales} />
       <SettlePaymentDialog
         saleId={settleSale?.id || null}
         amountPending={Number(settleSale?.amount_pending) || 0}

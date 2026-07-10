@@ -6769,6 +6769,10 @@ export type Database = {
         Args: { p_profile_id: string; p_return_id: string; p_store: string }
         Returns: Json
       }
+      revert_sale_payment: {
+        Args: { p_payment_id: string; p_reason: string }
+        Returns: Json
+      }
       save_ai_interaction: {
         Args: {
           p_answer: string
