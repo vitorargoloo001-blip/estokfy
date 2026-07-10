@@ -16,7 +16,7 @@ interface SellerStats {
   today_pix_total: number;
   today_cash_count: number;
   today_cash_total: number;
-  month_by_category: Array<{ category: string; qty: number; revenue: number }>;
+  today_by_category: Array<{ category: string; qty: number; revenue: number }>;
   month_sales_count: number;
   month_sales_total: number;
   avg_ticket: number;
@@ -123,15 +123,15 @@ export default function SellerDashboard() {
         ))}
       </motion.div>
 
-      {!loading && stats && stats.month_by_category?.length > 0 && (() => {
-        const cats = stats.month_by_category;
+      {!loading && stats && stats.today_by_category?.length > 0 && (() => {
+        const cats = stats.today_by_category;
         const totalQty = cats.reduce((s, c) => s + (c.qty || 0), 0) || 1;
         const maxQty = Math.max(...cats.map(c => c.qty || 0), 1);
         return (
           <div className="space-y-2">
             <div className="flex items-center justify-between px-1">
               <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Resumo por tipo de produto vendido (mês)
+                Resumo por tipo de produto vendido (hoje)
               </h2>
               <span className="text-[11px] text-muted-foreground">{totalQty} unidade(s)</span>
             </div>
