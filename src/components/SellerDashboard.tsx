@@ -5,7 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermissions } from '@/hooks/usePermissions';
-import { ShoppingCart, Users, Package, Receipt, Target, RotateCcw, Plus, Search, Boxes, QrCode, Banknote } from 'lucide-react';
+import {
+  ShoppingCart, Users, Package, Receipt, Target, RotateCcw, Plus, Search, Boxes, QrCode, Banknote,
+  CreditCard, Hourglass, Gift, ArrowLeftRight, Wallet,
+} from 'lucide-react';
 
 interface SellerStats {
   today_sales_count: number;
@@ -14,6 +17,7 @@ interface SellerStats {
   today_pix_total: number;
   today_cash_count: number;
   today_cash_total: number;
+  today_payment_methods: Record<string, { count: number; amount: number }>;
   month_sales_count: number;
   month_sales_total: number;
   avg_ticket: number;
@@ -22,6 +26,15 @@ interface SellerStats {
   returns_count: number;
   goal_target: number | null;
 }
+
+const PM_LABEL: Record<string, string> = {
+  pix: 'PIX', card: 'Cartão', credit_card: 'Cartão de crédito', debit_card: 'Cartão de débito',
+  cash: 'Dinheiro', transfer: 'Transferência', pending: 'A prazo', credit: 'Crédito cliente', other: 'Outro',
+};
+const PM_ICON: Record<string, typeof QrCode> = {
+  pix: QrCode, card: CreditCard, credit_card: CreditCard, debit_card: CreditCard,
+  cash: Banknote, transfer: ArrowLeftRight, pending: Hourglass, credit: Gift, other: Wallet,
+};
 
 /**
  * Dashboard exclusivo para cargos sem visão financeira (vendedor, estoque,
@@ -119,6 +132,45 @@ export default function SellerDashboard() {
           </motion.div>
         ))}
       </motion.div>
+
+      {!loading && stats && Object.keys(stats.today_payment_methods || {}).length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
+            Formas de pagamento (hoje)
+          </h2>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+            {Object.entries(stats.today_payment_methods).map(([method, info]) => {
+              const Icon = PM_ICON[method] || Wallet;
+              const isPending = method === 'pending';
+              const pct = stats.today_sales_total > 0 ? (info.amount / stats.today_sales_total) * 100 : 0;
+              return (
+                <Card key={method}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                        <Icon className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold truncate">{PM_LABEL[method] || method}</div>
+                        <div className="text-[11px] text-muted-foreground">{info.count} venda{info.count !== 1 ? 's' : ''}</div>
+                      </div>
+                    </div>
+                    <div className={`text-lg font-bold tabular-nums ${isPending ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                      {fmt(info.amount)}
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-primary to-accent" style={{ width: `${Math.max(pct, 2)}%` }} />
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-1 tabular-nums">
+                      {pct.toFixed(1)}% das minhas vendas hoje{isPending ? ' · pendente' : ''}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {!loading && stats?.goal_target != null && (
         <Card>
