@@ -336,22 +336,14 @@ export default function AccountsReceivable() {
     </div>
   );
 
+  // Tudo nesta tela é, por definição, ainda não quitado (a consulta só traz
+  // pending/partial) — então todo badge aqui usa o mesmo tom de vermelho,
+  // igual ao tratamento de "não quitada" em Contas a Pagar.
   const statusBadge = (s: PendingSale) => {
-    if (isOverdue(s))
-      return (
-        <Badge className="bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/15 text-[10px]">
-          Vencida
-        </Badge>
-      );
-    if (s.payment_status === 'partial')
-      return (
-        <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 hover:bg-amber-500/15 text-[10px]">
-          Parcial
-        </Badge>
-      );
+    const label = isOverdue(s) ? 'Vencida' : s.payment_status === 'partial' ? 'Parcial' : 'Pendente';
     return (
-      <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 hover:bg-amber-500/15 text-[10px]">
-        Pendente
+      <Badge className="bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/15 text-[10px]">
+        {label}
       </Badge>
     );
   };
@@ -460,7 +452,7 @@ export default function AccountsReceivable() {
               return (
               <Card
                 key={s.id}
-                className={cn(isOverdue(s) && 'border-destructive/40 bg-destructive/5')}
+                className="border-destructive/40 bg-destructive/5"
               >
                 <CardContent className="p-3 space-y-2">
                   <div className="flex justify-between items-start gap-2">
@@ -535,9 +527,7 @@ export default function AccountsReceivable() {
                   const expanded = expandedIds.has(s.id);
                   return (
                   <Fragment key={s.id}>
-                  <TableRow
-                    className={cn(isOverdue(s) && 'bg-destructive/5')}
-                  >
+                  <TableRow className="bg-destructive/5">
                     <TableCell className="py-2.5 text-sm whitespace-nowrap">
                       {new Date(s.created_at).toLocaleDateString('pt-BR')}
                     </TableCell>
@@ -580,7 +570,7 @@ export default function AccountsReceivable() {
                     <TableCell className="py-2.5 text-center">{statusBadge(s)}</TableCell>
                   </TableRow>
                   {expanded && items.length > 1 && (
-                    <TableRow className={cn(isOverdue(s) && 'bg-destructive/5')}>
+                    <TableRow className="bg-destructive/5">
                       <TableCell colSpan={7} className="py-2 px-3">
                         <ItemsBreakdown items={items} />
                       </TableCell>
