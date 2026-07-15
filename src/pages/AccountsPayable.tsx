@@ -101,7 +101,14 @@ export default function AccountsPayable() {
     if (r.status === 'paid') return <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">Paga</Badge>;
     if (r.status === 'cancelled') return <Badge variant="outline">Cancelada</Badge>;
     if (isOverdue(r)) return <Badge variant="destructive">Vencida</Badge>;
-    return <Badge variant="secondary">Pendente</Badge>;
+    return <Badge className="bg-destructive/15 text-destructive border-destructive/30">Pendente</Badge>;
+  };
+
+  // Verde = quitada, vermelho = ainda não quitada (pendente ou vencida), neutro = cancelada.
+  const rowColorClass = (r: Payable) => {
+    if (r.status === 'paid') return 'border-emerald-500/40 bg-emerald-500/5';
+    if (r.status === 'cancelled') return '';
+    return 'border-destructive/40 bg-destructive/5';
   };
 
   return (
@@ -157,7 +164,7 @@ export default function AccountsPayable() {
       ) : isMobile ? (
         <div className="space-y-3">
           {filtered.map(r => (
-            <Card key={r.id} className={isOverdue(r) ? 'border-destructive/50' : ''}>
+            <Card key={r.id} className={rowColorClass(r)}>
               <CardContent className="p-3 space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -209,7 +216,7 @@ export default function AccountsPayable() {
               </TableHeader>
               <TableBody>
                 {filtered.map(r => (
-                  <TableRow key={r.id} className={isOverdue(r) ? 'bg-destructive/5' : ''}>
+                  <TableRow key={r.id} className={rowColorClass(r)}>
                     <TableCell className="text-sm font-medium">{r.description}</TableCell>
                     <TableCell className="text-sm capitalize">{r.category}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{r.suppliers?.name || '—'}</TableCell>
