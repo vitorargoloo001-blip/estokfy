@@ -122,6 +122,7 @@ Deno.serve(async (req) => {
       const msg = rpcErr.message || "";
       if (msg.includes("estoque_insuficiente")) return json({ error: "estoque_insuficiente", message: "Estoque insuficiente." }, 400);
       if (msg.includes("produto_invalido")) return json({ error: "produto_invalido", message: "Produto inválido." }, 400);
+      if (msg.includes("cliente_invalido")) return json({ error: "cliente_invalido", message: "Cliente não encontrado. Selecione o cliente novamente." }, 400);
       if (msg.includes("qty_invalida")) return json({ error: "qty_invalida", message: "Quantidade inválida." }, 400);
       if (msg.includes("store_invalida")) return json({ error: "store_invalida", message: "Loja inválida." }, 400);
       if (msg.includes("sem_permissao_para_vender")) return json({ error: "sem_permissao_para_vender", message: "Você não tem permissão para registrar vendas." }, 403);

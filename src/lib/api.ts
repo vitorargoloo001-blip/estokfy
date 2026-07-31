@@ -34,6 +34,7 @@ const BUSINESS_ERRORS: Record<string, string> = {
   estoque_insuficiente: 'Estoque insuficiente para um ou mais itens.',
   payload_invalido: 'Dados da requisição inválidos. Revise os campos.',
   produto_invalido: 'Produto não encontrado ou inativo.',
+  cliente_invalido: 'Cliente não encontrado. Selecione o cliente novamente.',
   qty_invalida: 'Quantidade inválida.',
   idempotency_conflict: 'A operação já está sendo processada. Aguarde alguns segundos.',
   missing_token: 'Sessão expirada. Faça login novamente.',
