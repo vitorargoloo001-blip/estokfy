@@ -378,8 +378,12 @@ export default function Dashboard() {
                   </div>
                   <div className="text-right ml-2 shrink-0">
                     <p className="text-sm font-semibold">{fmt(Number(s.net_total))}</p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${s.status === 'paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200' : 'bg-muted text-muted-foreground'}`}>
-                      {s.status === 'paid' ? 'Pago' : s.status}
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      s.payment_status === 'paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200' :
+                      s.payment_status === 'partial' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                      'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                    }`}>
+                      {s.payment_status === 'paid' ? 'Pago' : s.payment_status === 'partial' ? 'Parcial' : 'Pendente'}
                     </span>
                   </div>
                 </div>

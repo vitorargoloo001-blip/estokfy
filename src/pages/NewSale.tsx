@@ -669,7 +669,7 @@ export default function NewSale() {
                     <Clock className="h-3.5 w-3.5" /> Venda com {fmt(pendingSum)} pendente
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Data prevista para pagamento (opcional)</Label>
+                    <Label className="text-xs">Data prevista para pagamento *</Label>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button variant="outline" className={cn('w-full h-10 justify-start text-left font-normal', !dueDate && 'text-muted-foreground')}>
