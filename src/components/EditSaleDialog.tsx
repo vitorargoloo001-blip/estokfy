@@ -76,6 +76,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
   const [showConfirm, setShowConfirm] = useState(false);
   const [allowNegative, setAllowNegative] = useState(false);
   const [confirmRevert, setConfirmRevert] = useState(false);
+  const [wantsStatusChange, setWantsStatusChange] = useState(false);
 
   useEffect(() => {
     if (!open || !saleId || !profile) return;
@@ -84,6 +85,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
     setShowConfirm(false);
     setAllowNegative(false);
     setConfirmRevert(false);
+    setWantsStatusChange(false);
 
     // Carrega produtos com paginação para suportar lojas grandes (>2000 itens)
     const loadAllProducts = async () => {
@@ -426,10 +428,23 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>Status</Label>
-                  <Select value={paymentStatus} onValueChange={setPaymentStatus}>
-                    <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
-                    <SelectContent>{PAY_STATUS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
-                  </Select>
+                  {wasPaid && !wantsStatusChange ? (
+                    <div className="flex h-10 items-center justify-between rounded-md border bg-muted/40 px-3">
+                      <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Pago</span>
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                        onClick={() => setWantsStatusChange(true)}
+                      >
+                        Marcar como não paga
+                      </button>
+                    </div>
+                  ) : (
+                    <Select value={paymentStatus} onValueChange={setPaymentStatus}>
+                      <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                      <SelectContent>{PAY_STATUS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Forma</Label>
@@ -440,7 +455,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
                 </div>
               </div>
               {willRevertPayment && (
-                <p className="text-xs text-amber-700 dark:text-amber-400">⚠ Mudança de pago para {paymentStatus} — exige confirmação na próxima tela.</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400">⚠ Isso vai estornar o pagamento já recebido desta venda ({fmt(Number(origSale?.amount_paid) || 0)}) e marcá-la como não paga — exige confirmação na próxima tela. Para corrigir só a forma de pagamento ou o valor, não é preciso mudar o status. Para devolver parte do dinheiro, use "Estornar" na tela de detalhes da venda.</p>
               )}
             </section>
 
