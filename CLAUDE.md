@@ -27,6 +27,7 @@ npm run build                # production build -> dist/
 npm run lint                 # eslint .
 npm run test                  # vitest run (all unit tests, once)
 npm run test:watch            # vitest watch mode
+npx tsc --noEmit -p .         # typecheck without emitting (no separate npm script for this)
 npx vitest run path/to/file.test.ts   # single unit test file
 npx playwright test path/to/file.spec.ts   # single e2e test (uses lovable-agent-playwright-config)
 ```
@@ -47,6 +48,8 @@ supabase gen types typescript --linked > src/integrations/supabase/types.ts   # 
 
 Multi-tenant SaaS (Portuguese-BR), isolation by `store_id`. Every authenticated user has exactly one `profiles` row (`auth_user_id` → `store_id` + `role`). RLS is enabled on effectively every table; the standard policy shape is `store_id IN (SELECT store_id FROM profiles WHERE auth_user_id = auth.uid())`. Money-critical mutations (sales, stock, returns) go through `SECURITY DEFINER` RPCs called from Edge Functions with an `Idempotency-Key` header (see `create_sale_atomic`, `stock-adjust`, `sales-create`), not raw table writes from the frontend — follow that pattern for new financial/inventory operations.
 
+**RPC overload footgun:** `CREATE OR REPLACE FUNCTION` with a *changed* parameter list creates a new overload instead of replacing the old one — Postgres then has to resolve ambiguity by argument count/type, and stale overloads with outdated logic can silently linger for months. This has caused real bugs twice (`create_sale_atomic` had 3 live overloads, `settle_sale_payment` currently has 2). When editing an existing RPC's signature, check `select oid::regprocedure from pg_proc where proname = '<name>'` first and `DROP FUNCTION` the old signature in the same migration.
+
 Two independent gating layers on top of RLS:
 - **Role-based** (core features): `src/lib/roleAccess.ts` (`canAccessRoute`) + `<RequireRoleRoute>` wrapper in `App.tsx`. Roles: `owner|admin|manager|sales|stock|finance|viewer`.
 - **Module-based** (premium features like Connect): `store_modules` table (`module_key`, `is_active`, `deactivation_scheduled_at`) + `<RequireConnectModule>` wrapper, backed by `useConnectModuleAccess()` reading `AuthContext.storeModules` (loaded via `get_store_modules` RPC). `AuthContext`'s `modulesLoading` **must** start `true` — it gates whether `RequireConnectModule` shows a spinner or redirects; if it starts `false`, a cold page load (hard refresh, deep link) races ahead of the RPC and kicks the user back to `/` before modules ever load. (This exact regression happened once — see git history around `AuthContext.tsx` if it resurfaces.)
@@ -62,6 +65,12 @@ Offline-first: `src/lib/offlineDb.ts` (IndexedDB queue via `idb`) + `src/lib/syn
 Production is **Cloudflare Pages only**: `https://estokfy.pages.dev`, auto-deploys on every push to `main` via GitHub integration (no manual deploy step needed — just `git push`). Supabase Auth's Site URL and Redirect URLs must stay pointed at this domain. Netlify (`estokfy-dibacell.netlify.app`) and Surge (`estokfy.surge.sh`) are decommissioned — don't reintroduce references to either; if you see one, it's a leftover from before the hosting consolidation and should be fixed to point at `estokfy.pages.dev`.
 
 Migrations are applied by pasting SQL into the Supabase SQL Editor as often as by `supabase db push` — when investigating "why doesn't this RPC/table exist," always check what's actually live in production (`information_schema`, `pg_proc`) rather than assuming the migrations folder is authoritative; the two have drifted before (objects applied live but never committed, or vice versa).
+
+To confirm a push actually deployed: `npx wrangler pages deployment list --project-name=estokfy --json` and check the entry for the latest commit hash has `"Status": "Active"`.
+
+For one-off production reads/writes that don't belong in a committed migration (data audits, test-data cleanup, ad-hoc verification), write a throwaway Node script into `_migracao/` (gitignored) that POSTs to the Supabase Management API (`https://api.supabase.com/v1/projects/{ref}/database/query`) with a personal access token, then delete the script when done — this directory already has examples of the pattern. Never hardcode a Management API token or session JWT outside `_migracao/`.
+
+New signups require a confirmed email **and** manual Pix-payment approval (`payment_verifications`, `stores.access_enabled` — see `docs/BUSINESS_RULES.md`) before the app is usable, and Supabase's mailer has a low default rate limit, so signing up a throwaway QA account through the UI usually fails. To create one quickly: PATCH `mailer_autoconfirm` to `true` via the Management API's `/config/auth` endpoint (auth config, not a migration), sign up normally, then flip it back to `false` and directly `UPDATE stores SET access_enabled = true` + `payment_verifications.payment_status = 'approved_by_admin'` for that one store via a `_migracao/` script. Delete the test store the same way when done.
 
 ## Coding practice guidelines
 
