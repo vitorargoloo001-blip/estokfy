@@ -75,7 +75,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [allowNegative, setAllowNegative] = useState(false);
-  const [confirmRevert, setConfirmRevert] = useState(false);
+  const [revertConfirmText, setRevertConfirmText] = useState('');
   const [wantsStatusChange, setWantsStatusChange] = useState(false);
 
   useEffect(() => {
@@ -84,7 +84,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
     setReason('');
     setShowConfirm(false);
     setAllowNegative(false);
-    setConfirmRevert(false);
+    setRevertConfirmText('');
     setWantsStatusChange(false);
 
     // Carrega produtos com paginação para suportar lojas grandes (>2000 itens)
@@ -180,6 +180,8 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
 
   const wasPaid = origSale?.payment_status === 'paid';
   const willRevertPayment = wasPaid && paymentStatus !== 'paid';
+  const REVERT_CONFIRM_WORD = 'ESTORNAR';
+  const confirmRevert = revertConfirmText.trim().toUpperCase() === REVERT_CONFIRM_WORD;
 
   const validate = (): string | null => {
     if (!canEdit) return 'Sem permissão para editar vendas';
@@ -234,7 +236,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
       const msg = err?.message || 'Erro ao salvar edição';
       if (msg.includes('CONFIRM_REVERT_PAYMENT_REQUIRED')) {
         toast.error('Confirme o estorno do pagamento para prosseguir');
-        setConfirmRevert(false);
+        setRevertConfirmText('');
       } else if (msg.includes('Estoque insuficiente')) {
         toast.error(msg);
       } else {
@@ -296,10 +298,19 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
                     <p className="text-xs text-muted-foreground">A venda estava paga. Será criado um lançamento de saída no caixa para estornar {fmt(Number(origSale?.amount_paid) || Number(origSale?.net_total) || 0)}.</p>
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={confirmRevert} onChange={e => setConfirmRevert(e.target.checked)} />
-                  Confirmo o estorno do pagamento
-                </label>
+                <div className="space-y-1">
+                  <Label htmlFor="revert-confirm-text" className="text-xs">
+                    Para confirmar, digite <span className="font-mono font-semibold">{REVERT_CONFIRM_WORD}</span>
+                  </Label>
+                  <Input
+                    id="revert-confirm-text"
+                    value={revertConfirmText}
+                    onChange={e => setRevertConfirmText(e.target.value)}
+                    placeholder={REVERT_CONFIRM_WORD}
+                    className={cn('h-9 font-mono', confirmRevert && 'border-emerald-500 focus-visible:ring-emerald-500')}
+                    autoComplete="off"
+                  />
+                </div>
               </div>
             )}
 

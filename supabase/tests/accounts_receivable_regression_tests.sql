@@ -10,13 +10,20 @@
 -- "Pendente" — o que a RPC edit_sale_atomic interpreta como um estorno
 -- explícito do pagamento (zera amount_paid, cria saída de caixa).
 --
--- Corrigido em duas camadas:
---   1) Frontend (EditSaleDialog.tsx, commit 771c3a8): para vendas já
---      pagas, o campo Status fica travado como "Pago" e só é editável
---      após clique explícito em "Marcar como não paga".
+-- Corrigido em três camadas:
+--   1) Frontend (EditSaleDialog.tsx, commit 771c3a8 + reforço posterior):
+--      para vendas já pagas, o campo Status fica travado como "Pago" e só
+--      é editável após clique explícito em "Marcar como não paga"; a
+--      confirmação do estorno exige digitar a palavra ESTORNAR (não é
+--      mais um simples checkbox clicável sem ler).
 --   2) Backend (edit_sale_atomic, já existente): reversão pago→não-pago
 --      exige p_confirm_revert_payment = true, senão lança
 --      'CONFIRM_REVERT_PAYMENT_REQUIRED' e nada é alterado.
+--   3) Rede de segurança (trg_sales_alert_payment_reverted, migration
+--      20260805000001): QUALQUER UPDATE em sales que tire uma venda de
+--      'paid' — por este ou por qualquer outro caminho, presente ou
+--      futuro — gera notificação crítica imediata (visível no sino do
+--      app em até 60s), fechando o cenário de "descobri dias depois".
 --
 -- Este arquivo tranca a garantia de dados: uma venda 'paid' NUNCA deve
 -- voltar para pending/partial como efeito colateral de uma edição de
@@ -154,6 +161,19 @@ BEGIN
     v_errors := v_errors + 1;
   END IF;
 
+  -- Edição de rotina (continua paid) não deve disparar o alerta de reversão
+  SELECT COUNT(*) INTO v_count FROM public.notifications
+   WHERE store_id = v_store AND entity_type = 'sale' AND entity_id = v_sale1
+     AND type = 'sale_payment_reverted';
+
+  v_tests := v_tests + 1;
+  IF v_count = 0 THEN
+    RAISE NOTICE '✅ Venda 1: nenhum alerta de reversão disparado por edição de rotina';
+  ELSE
+    RAISE NOTICE '❌ FALHA: alerta de reversão disparou sem reversão real (%)', v_count;
+    v_errors := v_errors + 1;
+  END IF;
+
   -- ────────────────────────────────────────────────────────────
   -- TESTE 3: tentar reverter pagamento SEM confirmação explícita
   -- deve falhar e não alterar nada
@@ -238,6 +258,35 @@ BEGIN
     RAISE NOTICE '✅ Venda 1: estorno de caixa foi registrado (% lançamento(s))', v_count;
   ELSE
     RAISE NOTICE '❌ FALHA: nenhum lançamento de estorno de caixa encontrado';
+    v_errors := v_errors + 1;
+  END IF;
+
+  -- Rede de segurança (trg_sales_alert_payment_reverted): mesmo uma
+  -- reversão EXPLÍCITA e permitida deve gerar alerta crítico imediato,
+  -- para o dono da loja ver o que aconteceu sem precisar descobrir depois.
+  SELECT COUNT(*) INTO v_count FROM public.notifications
+   WHERE store_id = v_store AND entity_type = 'sale' AND entity_id = v_sale1
+     AND type = 'sale_payment_reverted' AND severity = 'critical';
+
+  v_tests := v_tests + 1;
+  IF v_count >= 1 THEN
+    RAISE NOTICE '✅ Venda 1: notificação crítica de reversão foi criada';
+  ELSE
+    RAISE NOTICE '❌ FALHA: nenhuma notificação de reversão encontrada (trg_sales_alert_payment_reverted)';
+    v_errors := v_errors + 1;
+  END IF;
+
+  -- E a tentativa BLOQUEADA do Teste 3 não deve ter gerado alerta nenhum
+  -- (nada mudou no banco, então o trigger nem deveria ter disparado).
+  SELECT COUNT(*) INTO v_count FROM public.notifications
+   WHERE store_id = v_store AND entity_type = 'sale' AND entity_id = v_sale1
+     AND type = 'sale_payment_reverted';
+
+  v_tests := v_tests + 1;
+  IF v_count = 1 THEN
+    RAISE NOTICE '✅ Venda 1: exatamente 1 notificação de reversão (nenhuma duplicada pela tentativa bloqueada)';
+  ELSE
+    RAISE NOTICE '❌ FALHA: esperado 1 notificação de reversão, encontrado %', v_count;
     v_errors := v_errors + 1;
   END IF;
 
