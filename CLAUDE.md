@@ -58,7 +58,9 @@ Super Admin (`/super-admin/*`) is a fully separate route tree gated by `is_super
 
 `src/integrations/supabase/client.ts` and `types.ts` are auto-generated — never hand-edit; regenerate types with the command above after any schema change. Same for `supabase/config.toml`.
 
-Offline-first: `src/lib/offlineDb.ts` (IndexedDB queue via `idb`) + `src/lib/syncEngine.ts` (replay on reconnect) + `OfflineContext` (online/offline + pending-sync status). Mutations made while offline are queued and flushed through the same edge-function/RPC path once connectivity returns.
+Offline-first: `src/lib/offlineDb.ts` (IndexedDB queue via `idb`) + `src/lib/syncEngine.ts` (replay on reconnect) + `OfflineContext` (online/offline + pending-sync status). Mutations made while offline are queued and flushed through the same edge-function/RPC path once connectivity returns. `addToSyncQueue` currently has zero callers anywhere in `src/` — the queue plumbing exists but nothing enqueues a mutation into it yet, so don't assume any write path is actually offline-safe without checking first.
+
+A `trg_sales_alert_payment_reverted` trigger on `public.sales` fires a `'critical'` row into `public.notifications` any time a row's `payment_status` leaves `'paid'` (regardless of which RPC caused it) — a broad safety net after a real incident where `EditSaleDialog` could silently un-pay a sale. It fires on *every* such transition, including legitimate ones (e.g. cancelling a return that had paid off a sale via `abatimento`), so a critical notification alone isn't evidence of a bug — check `sale_audit_logs`/`return_exchange_versions` for what actually caused it before assuming something broke.
 
 ## Hosting and deployment
 
@@ -66,7 +68,7 @@ Production is **Cloudflare Pages only**: `https://estokfy.pages.dev`, auto-deplo
 
 Migrations are applied by pasting SQL into the Supabase SQL Editor as often as by `supabase db push` — when investigating "why doesn't this RPC/table exist," always check what's actually live in production (`information_schema`, `pg_proc`) rather than assuming the migrations folder is authoritative; the two have drifted before (objects applied live but never committed, or vice versa).
 
-To confirm a push actually deployed: `npx wrangler pages deployment list --project-name=estokfy --json` and check the entry for the latest commit hash has `"Status": "Active"`.
+To confirm a push actually deployed: `npx wrangler pages deployment list --project-name=estokfy --json` and check the entry for the latest commit hash has `"Status": "Active"`. **Don't assume a push deployed just because it didn't error** — Cloudflare Pages builds run async after the git push returns, and can fail silently from the pusher's point of view (a `"Failure"` status here doesn't surface anywhere in the git/terminal output). This happened for real: a stale `bun.lockb` sitting in the repo since the very first commit (the project has only ever used npm — see Commands above) made Cloudflare's package-manager auto-detection pick `bun install --frozen-lockfile` over `npm ci`, which started failing the moment `package.json` next changed without a matching `bun.lockb` update, and silently pinned production to a stale build for days. Fixed by deleting `bun.lockb`; if deploys start failing again after a dependency change, check for its reappearance first.
 
 For one-off production reads/writes that don't belong in a committed migration (data audits, test-data cleanup, ad-hoc verification), write a throwaway Node script into `_migracao/` (gitignored) that POSTs to the Supabase Management API (`https://api.supabase.com/v1/projects/{ref}/database/query`) with a personal access token, then delete the script when done — this directory already has examples of the pattern. Never hardcode a Management API token or session JWT outside `_migracao/`.
 
