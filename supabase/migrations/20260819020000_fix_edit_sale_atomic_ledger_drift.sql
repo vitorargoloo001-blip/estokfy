@@ -57,6 +57,7 @@ DECLARE
   v_excess numeric;
   v_pay_row record;
   v_reduce numeric;
+  v_cash_row record;
   -- derived payment fields for the final UPDATE
   v_new_amount_paid numeric;
   v_new_amount_pending numeric;
@@ -289,6 +290,23 @@ BEGIN
       ELSE
         UPDATE public.payments SET amount = amount - v_reduce WHERE id = v_pay_row.id;
       END IF;
+
+      -- Espelha a mesma redução no cash_entries correspondente — método
+      -- 'credit' nunca gera cash_entries (nada a fazer nesse caso).
+      IF v_pay_row.method <> 'credit' THEN
+        SELECT * INTO v_cash_row FROM public.cash_entries
+         WHERE reference_type = 'sale' AND reference_id = p_sale_id
+           AND entry_type = 'income' AND payment_method = v_pay_row.method
+         ORDER BY occurred_at DESC LIMIT 1 FOR UPDATE;
+        IF FOUND THEN
+          IF v_reduce >= v_cash_row.amount THEN
+            DELETE FROM public.cash_entries WHERE id = v_cash_row.id;
+          ELSE
+            UPDATE public.cash_entries SET amount = amount - v_reduce WHERE id = v_cash_row.id;
+          END IF;
+        END IF;
+      END IF;
+
       v_excess := v_excess - v_reduce;
     END LOOP;
   END IF;
