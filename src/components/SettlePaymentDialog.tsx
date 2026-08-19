@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarIcon } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/api';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -55,6 +56,23 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
 
     setSubmitting(true);
     try {
+      // Revalida o saldo devedor direto no banco antes de enviar — a prop
+      // `amountPending` é um snapshot de quando a tela/lista foi carregada e
+      // pode estar desatualizada. A RPC também trava isso, mas revalidar aqui
+      // evita uma rejeição confusa e mostra o valor real ao usuário.
+      const { data: freshSale } = await supabase
+        .from('sales')
+        .select('amount_pending')
+        .eq('id', saleId)
+        .maybeSingle();
+      const currentPending = freshSale ? Number(freshSale.amount_pending) : amountPending;
+      if (amount > currentPending + 0.01) {
+        toast.error(`O saldo devedor mudou. Valor atual: ${fmt(currentPending)}. Atualize a tela e tente novamente.`);
+        setSubmitting(false);
+        onSettled?.();
+        return;
+      }
+
       const result = await invokeEdgeFunction<{ payment_status: string }>('sales-settle-payment', {
         headers: { 'Idempotency-Key': crypto.randomUUID() },
         body: {

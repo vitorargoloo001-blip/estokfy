@@ -132,6 +132,13 @@ Deno.serve(async (req) => {
       if (msg.includes("data_futura_invalida")) return json({ error: "data_futura_invalida", message: "Não é possível registrar uma venda em uma data futura." }, 400);
       if (msg.includes("credito_insuficiente")) return json({ error: "credito_insuficiente", message: "O cliente não tem crédito suficiente para o valor informado." }, 400);
       if (msg.includes("credito_sem_cliente")) return json({ error: "credito_sem_cliente", message: "Selecione um cliente para usar crédito como pagamento." }, 400);
+      if (msg.includes("pagamentos_nao_batem_com_total")) {
+        await svc.from("audit_logs").insert({
+          store_id, action: "blocked_payment_mismatch", entity: "sale",
+          after_json: { attempted_items: items, attempted_payments: payments, auth_user_id: user.id, reason: "pagamentos_nao_batem_com_total" },
+        });
+        return json({ error: "pagamentos_nao_batem_com_total", message: "A soma dos pagamentos não corresponde ao total da venda." }, 400);
+      }
       return json({ error: "internal_error", message: "Erro interno. Tente novamente." }, 500);
     }
 

@@ -85,6 +85,13 @@ Deno.serve(async (req) => {
       if (msg.includes("venda_nao_encontrada")) return json({ error: "venda_nao_encontrada", message: "Venda não encontrada." }, 404);
       if (msg.includes("observacao_muito_longa")) return json({ error: "observacao_muito_longa", message: "A observação pode ter no máximo 500 caracteres." }, 400);
       if (msg.includes("venda_ja_quitada")) return json({ error: "venda_ja_quitada", message: "Venda já está quitada." }, 400);
+      if (msg.includes("valor_maior_que_saldo_devedor")) {
+        await svc.from("audit_logs").insert({
+          store_id: saleRow.store_id, action: "blocked_overpayment", entity: "sale", entity_id: sale_id,
+          after_json: { attempted_payments: payments, auth_user_id: user.id, reason: "valor_maior_que_saldo_devedor" },
+        });
+        return json({ error: "valor_maior_que_saldo_devedor", message: "O valor informado é maior que o saldo devedor da venda. Atualize a tela e tente novamente." }, 400);
+      }
       if (msg.includes("metodo_invalido_para_quitacao")) return json({ error: "metodo_invalido", message: "Método inválido para quitação." }, 400);
       if (msg.includes("pagamento_invalido")) return json({ error: "pagamento_invalido", message: "Valor de pagamento inválido." }, 400);
       if (msg.includes("sem_permissao_para_quitar")) return json({ error: "sem_permissao", message: "Sem permissão para quitar venda." }, 403);

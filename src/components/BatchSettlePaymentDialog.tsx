@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarIcon } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/api';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -98,11 +99,30 @@ export default function BatchSettlePaymentDialog({ customerName, sales, open, on
     const errs: string[] = [];
     const paidIso = paidAt.toISOString();
 
+    // Revalida o saldo devedor de cada venda direto no banco antes de distribuir
+    // o valor — a lista em `sales` é um snapshot de quando o diálogo abriu e
+    // pode estar desatualizada. A RPC também trava isso (não aceita mais do
+    // que o saldo real), mas revalidar aqui evita rejeições desnecessárias.
+    const freshPendingById = new Map<string, number>();
+    try {
+      const { data: freshSales } = await supabase
+        .from('sales')
+        .select('id, amount_pending')
+        .in('id', ordered.map((s) => s.id));
+      for (const row of freshSales || []) {
+        freshPendingById.set(row.id, Number(row.amount_pending));
+      }
+    } catch {
+      // Se a revalidação falhar, segue com o snapshot local — a trava da RPC
+      // ainda protege contra sobra sendo aceita indevidamente.
+    }
+
     try {
       for (let i = 0; i < ordered.length; i++) {
         if (remainder <= 0.0001) break;
         const s = ordered[i];
-        const pay = Math.min(s.amount_pending, remainder);
+        const currentPending = freshPendingById.has(s.id) ? freshPendingById.get(s.id)! : s.amount_pending;
+        const pay = Math.min(currentPending, remainder);
         // Round to 2 decimals to avoid float drift
         const payRounded = Math.round(pay * 100) / 100;
         if (payRounded <= 0) continue;
