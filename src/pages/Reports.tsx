@@ -124,6 +124,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   other: 'Outro',
   outro: 'Outro',
   nao_informado: 'Não informado',
+  return_offset: 'Abatimento por devolução',
 };
 
 const PAYMENT_METHOD_ICONS: Record<string, typeof CreditCard> = {

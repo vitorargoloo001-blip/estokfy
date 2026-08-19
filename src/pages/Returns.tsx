@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Trash2, RotateCcw, Package, Loader2, CreditCard, Banknote, ArrowLeftRight, Search, ShoppingCart, Coins, Pencil, Ban, ScrollText } from 'lucide-react';
+import { Plus, Trash2, RotateCcw, Package, Loader2, CreditCard, Banknote, ArrowLeftRight, Search, ShoppingCart, Coins, Pencil, Ban, ScrollText, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -29,7 +29,7 @@ interface SaleItem { id: string; product_id: string; qty: number; unit_price: nu
 interface ReturnItem { product_id: string; product_name: string; sale_item_id: string | null; qty: number; max_qty: number; restock: boolean; refund_amount: number; }
 interface NewItem { product_id: string; name: string; qty: number; unit_price: number; }
 interface ProductLite { id: string; name: string; sale_price: number; on_hand: number; }
-interface ReturnRecord { id: string; sale_id: string | null; status: string; reason: string; notes: string | null; created_at: string; return_items: { qty: number; refund_amount: number; restock: boolean; product_id: string }[]; }
+interface ReturnRecord { id: string; sale_id: string | null; status: string; reason: string; notes: string | null; created_at: string; refund_mode: string | null; return_items: { qty: number; refund_amount: number; restock: boolean; product_id: string }[]; }
 
 const REASONS = [
   { value: 'defect', label: 'Defeito' },
@@ -67,6 +67,8 @@ const FRIENDLY_ERRORS: Record<string, string> = {
   valor_invalido: 'Valor inválido.',
   sem_divida_pendente: 'Este cliente não possui contas pendentes para abater.',
   cliente_obrigatorio_para_abatimento: 'Selecione o cliente para abater em dívida.',
+  modo_invalido: 'Modo de destino do valor inválido.',
+  modo_sobra_invalido: 'Modo de destino da sobra inválido.',
 };
 
 function resolveFriendlyError(msg: string): string {
@@ -120,7 +122,7 @@ export default function Returns() {
 
   // itens devolvidos
   const [items, setItems] = useState<ReturnItem[]>([]);
-  const [refundMode, setRefundMode] = useState<'credit' | 'cash' | 'abatimento'>('credit');
+  const [refundMode, setRefundMode] = useState<'credit' | 'cash' | 'abatimento' | 'abatimento_total'>('credit');
   // Abatimento em dívida pendente
   const [debts, setDebts] = useState<DebtRow[]>([]);
   const [debtsLoading, setDebtsLoading] = useState(false);
@@ -145,7 +147,7 @@ export default function Returns() {
   // Carrega as contas pendentes do cliente quando a opção "abater em dívida" estiver ativa
   useEffect(() => {
     let cancelled = false;
-    if (refundMode !== 'abatimento' || !effectiveCustomerId || !storeId) {
+    if (!['abatimento', 'abatimento_total'].includes(refundMode) || !effectiveCustomerId || !storeId) {
       setDebts([]);
       return;
     }
@@ -176,13 +178,20 @@ export default function Returns() {
     ? Math.max(0, items.reduce((s, i) => s + i.refund_amount * i.qty, 0) - targetDebt.amount_pending)
     : 0;
 
+  // Abatimento no saldo total: soma de todas as contas em aberto do cliente,
+  // sem escolher conta nenhuma — a distribuição FIFO é feita no backend.
+  const totalOpenBalance = debts.reduce((s, d) => s + d.amount_pending, 0);
+  const abatimentoTotalSurplus = refundMode === 'abatimento_total'
+    ? Math.max(0, items.reduce((s, i) => s + i.refund_amount * i.qty, 0) - totalOpenBalance)
+    : 0;
+
   const loadReturns = useCallback(async () => {
     if (!storeId) return;
     setLoading(true);
     try {
       let q = supabase
         .from('returns')
-        .select('id, sale_id, status, reason, notes, created_at, return_items(qty, refund_amount, restock, product_id)')
+        .select('id, sale_id, status, reason, notes, created_at, refund_mode, return_items(qty, refund_amount, restock, product_id)')
         .eq('store_id', storeId);
       if (sellerId) q = q.eq('created_by', sellerId);
       const { data, error } = await q.order('created_at', { ascending: false }).limit(50);
@@ -293,20 +302,37 @@ export default function Returns() {
         .select('product_id, qty, refund_amount, restock, sale_item_id, products(name)')
         .eq('return_id', r.id);
 
-      const [{ data: creditRow }, { data: cashRow }, { data: paymentRow }] = await Promise.all([
+      const [{ data: creditRow }, { data: cashRow }, { data: paymentRows }] = await Promise.all([
         supabase.from('loyalty_credits').select('id, customer_id').eq('source_return_id', r.id).neq('status', 'cancelled').maybeSingle(),
         supabase.from('cash_entries').select('id').eq('reference_type', 'return').eq('reference_id', r.id).maybeSingle(),
-        supabase.from('payments').select('id, sale_id').eq('return_id', r.id).maybeSingle(),
+        supabase.from('payments').select('id, sale_id').eq('return_id', r.id),
       ]);
+      const paymentRowsList = (paymentRows as { id: string; sale_id: string }[]) || [];
 
-      let mode: 'credit' | 'cash' | 'abatimento' = 'credit';
+      let mode: 'credit' | 'cash' | 'abatimento' | 'abatimento_total';
       let customerId: string | null = null;
-      if (creditRow) { mode = 'credit'; customerId = (creditRow as any).customer_id; }
-      else if (paymentRow) {
-        mode = 'abatimento';
-        const { data: saleRow } = await supabase.from('sales').select('customer_id').eq('id', (paymentRow as any).sale_id).maybeSingle();
-        customerId = (saleRow as any)?.customer_id || null;
-      } else if (cashRow) { mode = 'cash'; }
+
+      if (r.refund_mode) {
+        // Devolução criada depois da migration: o modo já vem gravado, não
+        // precisa inferir por efeito colateral.
+        mode = r.refund_mode as typeof mode;
+        if (paymentRowsList.length > 0) {
+          const { data: saleRow } = await supabase.from('sales').select('customer_id').eq('id', paymentRowsList[0].sale_id).maybeSingle();
+          customerId = (saleRow as any)?.customer_id || null;
+        } else if (creditRow) {
+          customerId = (creditRow as any).customer_id;
+        }
+      } else {
+        // Devolução anterior à migration: refund_mode é NULL, mantém a
+        // inferência antiga por efeito colateral (não quebra histórico).
+        if (creditRow) { mode = 'credit'; customerId = (creditRow as any).customer_id; }
+        else if (paymentRowsList.length > 0) {
+          mode = 'abatimento';
+          const { data: saleRow } = await supabase.from('sales').select('customer_id').eq('id', paymentRowsList[0].sale_id).maybeSingle();
+          customerId = (saleRow as any)?.customer_id || null;
+        } else if (cashRow) { mode = 'cash'; }
+        else { mode = 'credit'; }
+      }
 
       setOperation('devolucao');
       setIsAvulsa(!r.sale_id);
@@ -325,7 +351,10 @@ export default function Returns() {
         restock: it.restock,
         refund_amount: it.qty > 0 ? it.refund_amount / it.qty : it.refund_amount,
       })));
-      setTargetSaleId(mode === 'abatimento' && paymentRow ? (paymentRow as any).sale_id : '');
+      // Abatimento de conta única: pré-seleciona a venda afetada. Abatimento
+      // no saldo total: não há conta única pra pré-selecionar (distribuição
+      // automática entre várias).
+      setTargetSaleId(mode === 'abatimento' && paymentRowsList.length > 0 ? paymentRowsList[0].sale_id : '');
       setDebtMode(mode === 'abatimento' ? 'manual' : 'oldest');
       setEditingReturnId(r.id);
       setEditReasonText('');
@@ -401,6 +430,10 @@ export default function Returns() {
       if (debts.length === 0) { toast.error('Este cliente não possui contas pendentes para abater.'); return; }
       if (debtMode === 'manual' && !targetSaleId) { toast.error('Selecione qual dívida será abatida.'); return; }
     }
+    if (refundMode === 'abatimento_total') {
+      if (!effectiveCustomerId) { toast.error('Selecione o cliente para abater no saldo total.'); return; }
+      if (debts.length === 0) { toast.error('Este cliente não possui contas pendentes para abater.'); return; }
+    }
 
     setSubmitting(true);
     const payload: Record<string, any> = {
@@ -415,6 +448,9 @@ export default function Returns() {
     if (refundMode === 'abatimento') {
       payload.p_target_sale_id = debtMode === 'manual' ? targetSaleId : null;
       payload.p_surplus_mode = surplusMode;
+    } else if (refundMode === 'abatimento_total') {
+      payload.p_target_sale_id = null;
+      payload.p_surplus_mode = surplusMode;
     }
     logger.group('process_return_with_credit', { payload });
     try {
@@ -425,6 +461,9 @@ export default function Returns() {
         : refundMode === 'abatimento' ? (abatimentoSurplus > 0
             ? `Devolução abatida na dívida! Sobra de ${fmt(abatimentoSurplus)} ${surplusMode === 'cash' ? 'devolvida em dinheiro' : 'virou crédito'}.`
             : 'Devolução usada para abater a dívida do cliente!')
+        : refundMode === 'abatimento_total' ? (abatimentoTotalSurplus > 0
+            ? `Saldo total abatido! Sobra de ${fmt(abatimentoTotalSurplus)} ${surplusMode === 'cash' ? 'devolvida em dinheiro' : 'virou crédito'}.`
+            : 'Devolução usada para abater o saldo total em aberto do cliente!')
         : 'Devolução registrada com sucesso!');
       setDialogOpen(false); resetForm(); loadReturns();
     } catch (err: any) {
@@ -472,7 +511,7 @@ export default function Returns() {
     }
   };
 
-  const showCustomerPicker = ((operation === 'devolucao' && (refundMode === 'credit' || refundMode === 'abatimento')) || operation === 'troca');
+  const showCustomerPicker = ((operation === 'devolucao' && (refundMode === 'credit' || refundMode === 'abatimento' || refundMode === 'abatimento_total')) || operation === 'troca');
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -535,7 +574,7 @@ export default function Returns() {
                 {operation === 'devolucao' && (
                   <div className="space-y-2">
                     <Label>O que fazer com o valor?</Label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <button type="button" onClick={() => setRefundMode('credit')}
                         className={`flex flex-col gap-1 rounded-lg border p-2.5 text-left transition ${refundMode === 'credit' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-accent'}`}>
                         <CreditCard className="h-4 w-4 text-primary shrink-0" />
@@ -552,7 +591,13 @@ export default function Returns() {
                         className={`flex flex-col gap-1 rounded-lg border p-2.5 text-left transition ${refundMode === 'abatimento' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-accent'}`}>
                         <Coins className="h-4 w-4 shrink-0" />
                         <div className="text-xs font-medium leading-tight">Abater em dívida</div>
-                        <div className="text-[10px] text-muted-foreground leading-tight">Quita conta pendente</div>
+                        <div className="text-[10px] text-muted-foreground leading-tight">Quita uma conta específica</div>
+                      </button>
+                      <button type="button" onClick={() => setRefundMode('abatimento_total')}
+                        className={`flex flex-col gap-1 rounded-lg border p-2.5 text-left transition ${refundMode === 'abatimento_total' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-accent'}`}>
+                        <Wallet className="h-4 w-4 shrink-0" />
+                        <div className="text-xs font-medium leading-tight">Abater saldo total em aberto</div>
+                        <div className="text-[10px] text-muted-foreground leading-tight">Quita várias contas automaticamente</div>
                       </button>
                     </div>
 
@@ -597,6 +642,40 @@ export default function Returns() {
                             {abatimentoSurplus > 0 && (
                               <div className="space-y-1.5 border-t pt-2">
                                 <Label className="text-xs">A devolução é maior que a dívida. Sobra de {fmt(abatimentoSurplus)}:</Label>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button type="button" onClick={() => setSurplusMode('credit')}
+                                    className={`rounded-md border p-2 text-xs text-left transition ${surplusMode === 'credit' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-accent'}`}>Gerar crédito</button>
+                                  <button type="button" onClick={() => setSurplusMode('cash')}
+                                    className={`rounded-md border p-2 text-xs text-left transition ${surplusMode === 'cash' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-accent'}`}>Devolver troco</button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {refundMode === 'abatimento_total' && (
+                      <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                        {!effectiveCustomerId ? (
+                          <p className="text-xs text-muted-foreground">Selecione o cliente abaixo para ver o saldo em aberto.</p>
+                        ) : debtsLoading ? (
+                          <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /> Carregando saldo em aberto...</p>
+                        ) : debts.length === 0 ? (
+                          <p className="text-xs text-amber-600">Este cliente não possui contas pendentes. Escolha Crédito ou Dinheiro.</p>
+                        ) : (
+                          <>
+                            <div className="space-y-1 text-sm">
+                              <div className="flex justify-between"><span className="text-muted-foreground">Saldo atual em aberto do cliente</span><span className="font-semibold text-destructive">{fmt(totalOpenBalance)}</span></div>
+                              <div className="flex justify-between"><span className="text-muted-foreground">Valor da devolução</span><span className="font-semibold">{fmt(totalReturn)}</span></div>
+                              <div className="flex justify-between border-t pt-1"><span className="text-muted-foreground">Saldo após abatimento</span><span className="font-bold text-emerald-600">{fmt(Math.max(0, totalOpenBalance - totalReturn))}</span></div>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground">
+                              O valor é aplicado automaticamente nas contas mais antigas primeiro — {debts.length} conta(s) em aberto.
+                            </p>
+                            {abatimentoTotalSurplus > 0 && (
+                              <div className="space-y-1.5 border-t pt-2">
+                                <Label className="text-xs">A devolução é maior que o saldo total. Sobra de {fmt(abatimentoTotalSurplus)}:</Label>
                                 <div className="grid grid-cols-2 gap-2">
                                   <button type="button" onClick={() => setSurplusMode('credit')}
                                     className={`rounded-md border p-2 text-xs text-left transition ${surplusMode === 'credit' ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:bg-accent'}`}>Gerar crédito</button>

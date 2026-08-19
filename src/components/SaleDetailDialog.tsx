@@ -37,6 +37,7 @@ interface Payment {
   amount: number;
   provider: string | null;
   paid_at: string;
+  return_id: string | null;
 }
 
 interface Delivery {
@@ -65,6 +66,7 @@ const methodLabels: Record<string, string> = {
   cash: 'Dinheiro', pix: 'PIX', credit_card: 'Cartão Crédito',
   debit_card: 'Cartão Débito', transfer: 'Transferência', boleto: 'Boleto',
   pending: 'A prazo / Pendente', other: 'Outro',
+  return_offset: 'Abatimento por devolução',
 };
 
 const deliveryMethodLabels: Record<string, string> = {
@@ -259,7 +261,7 @@ export default function SaleDetailDialog({ saleId, open, onOpenChange, onSettled
                           {new Date(p.paid_at).toLocaleString('pt-BR')}
                         </p>
                       </div>
-                      {canRevertPayment && p.method !== 'pending' && (
+                      {canRevertPayment && p.method !== 'pending' && !p.return_id && (
                         <Button
                           size="icon"
                           variant="ghost"

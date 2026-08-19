@@ -137,6 +137,7 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   a_prazo: 'A prazo',
   outro: 'Outro',
   other: 'Outro',
+  return_offset: 'Abatimento por devolução',
 };
 
 export function labelMethod(m: string): string {

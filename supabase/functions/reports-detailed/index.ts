@@ -153,13 +153,16 @@ Deno.serve(async (req) => {
     const costTotal = realizedSales.reduce((s, r) => s + num(r.cost_total), 0);
     const grossProfit = realizedSales.reduce((s, r) => s + num(r.profit_gross), 0);
 
-    // --- Pagamentos válidos (descarta vendas canceladas/excluídas e method='pending')
+    // --- Pagamentos válidos (descarta vendas canceladas/excluídas, method='pending'
+    // e method='return_offset' — abatimento de devolução em dívida, nunca
+    // dinheiro recebido de verdade)
     const validPayments = payments.filter((p: any) => {
+      if (p.method === "pending" || p.method === "return_offset") return false;
       const s = p.sales;
       if (!s) return true; // pagamento solto: conta como recebido
       if (s.deleted_at) return false;
       if (s.status === "cancelled" || s.status === "refunded") return false;
-      return p.method !== "pending";
+      return true;
     });
 
     // Recebido total no período (paid_at)
@@ -228,7 +231,7 @@ Deno.serve(async (req) => {
         .select("sale_id, method, amount")
         .eq("store_id", storeId)
         .in("sale_id", realizedSaleIds);
-      salePaymentsAll = (spa || []).filter((p: any) => p.method !== "pending");
+      salePaymentsAll = (spa || []).filter((p: any) => p.method !== "pending" && p.method !== "return_offset");
     }
 
     // Agrupa pagamentos por venda
