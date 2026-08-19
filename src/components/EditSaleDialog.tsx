@@ -135,7 +135,13 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
         // V4: se a venda estava 'partial', tratamos como 'pending' no editor
         const ps = sale.payment_status || 'paid';
         setPaymentStatus(ps === 'partial' ? 'pending' : ps);
-        setPaymentMethod(pm.data?.[0]?.method || 'pix');
+        // 'pending' é uma linha placeholder de dívida, não uma forma de
+        // pagamento real (não aparece nem como opção do dropdown "Forma")
+        // — se for o último payment carregado (sempre o caso pra uma venda
+        // ainda 100% pendente), cai pro padrão em vez de deixar o estado
+        // com um valor que a RPC agora rejeita ao marcar como paga.
+        const loadedMethod = pm.data?.[0]?.method;
+        setPaymentMethod(loadedMethod && loadedMethod !== 'pending' ? loadedMethod : 'pix');
       }
       setLoading(false);
     }).catch((err) => {
@@ -237,6 +243,8 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
       if (msg.includes('CONFIRM_REVERT_PAYMENT_REQUIRED')) {
         toast.error('Confirme o estorno do pagamento para prosseguir');
         setRevertConfirmText('');
+      } else if (msg.includes('metodo_pagamento_invalido_para_quitacao')) {
+        toast.error('Selecione uma forma de pagamento real (PIX, dinheiro, cartão...) antes de marcar a venda como paga.');
       } else if (msg.includes('Estoque insuficiente')) {
         toast.error(msg);
       } else {
