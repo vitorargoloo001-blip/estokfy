@@ -10,6 +10,7 @@ import { Trophy, Gift, Clock, CheckCircle2, Package, ChevronDown, ChevronUp } fr
 import { useCustomerLoyalty, useLoyaltySettings } from '@/hooks/useLoyalty';
 
 interface SaleItemRow {
+  id: string;
   sale_id: string;
   qty: number;
   unit_price: number;
@@ -38,7 +39,7 @@ const fmtBRL = (n: number) => Number(n || 0).toLocaleString('pt-BR', { style: 'c
 export default function Customer360Dialog({ customerId, open, onOpenChange }: Props) {
   const [data, setData] = useState<Customer360Data | null>(null);
   const [loading, setLoading] = useState(false);
-  const [itemsBySale, setItemsBySale] = useState<Record<string, Array<{ name: string; qty: number }>>>({});
+  const [itemsBySale, setItemsBySale] = useState<Record<string, Array<{ name: string; qty: number; lineTotal: number; paid: number; pending: number }>>>({});
   const [expandedSales, setExpandedSales] = useState<Set<string>>(new Set());
   const { settings } = useLoyaltySettings();
   const { summary, credits, loading: loyaltyLoading, refresh: refreshLoyalty } =
@@ -57,13 +58,27 @@ export default function Customer360Dialog({ customerId, open, onOpenChange }: Pr
       if (ids.length) {
         const { data: items } = await supabase
           .from('sale_items')
-          .select('sale_id, qty, unit_price, product_name_snapshot, products(name)')
+          .select('id, sale_id, qty, unit_price, product_name_snapshot, products(name)')
           .in('sale_id', ids);
-        const map: Record<string, Array<{ name: string; qty: number }>> = {};
-        ((items as SaleItemRow[] | null) || []).forEach(it => {
+        const rows = (items as SaleItemRow[] | null) || [];
+        const itemIds = rows.map(it => it.id);
+        const allocById: Record<string, number> = {};
+        if (itemIds.length) {
+          const { data: allocs } = await supabase
+            .from('payment_allocations')
+            .select('sale_item_id, amount')
+            .in('sale_item_id', itemIds);
+          for (const row of allocs || []) {
+            allocById[row.sale_item_id] = (allocById[row.sale_item_id] || 0) + Number(row.amount);
+          }
+        }
+        const map: Record<string, Array<{ name: string; qty: number; lineTotal: number; paid: number; pending: number }>> = {};
+        rows.forEach(it => {
           const name = it.product_name_snapshot || it.products?.name || 'Produto removido';
+          const lineTotal = Number(it.qty || 0) * Number(it.unit_price || 0);
+          const paid = allocById[it.id] || 0;
           if (!map[it.sale_id]) map[it.sale_id] = [];
-          map[it.sale_id].push({ name, qty: Number(it.qty || 0) });
+          map[it.sale_id].push({ name, qty: Number(it.qty || 0), lineTotal, paid, pending: Math.max(0, lineTotal - paid) });
         });
         setItemsBySale(map);
       }
@@ -155,8 +170,14 @@ export default function Customer360Dialog({ customerId, open, onOpenChange }: Pr
                         <ul className="space-y-0.5">
                           {visible.map((it, i) => (
                             <li key={i} className="flex justify-between gap-2">
-                              <span className="truncate">{it.name}</span>
-                              <span className="text-muted-foreground shrink-0">{it.qty} un</span>
+                              <span className="truncate">{it.name} {it.qty > 1 && <span className="text-muted-foreground">({it.qty} un)</span>}</span>
+                              {it.pending <= 0.005 ? (
+                                <span className="text-[10px] text-success shrink-0">Pago</span>
+                              ) : it.paid > 0 ? (
+                                <span className="text-[10px] text-warning shrink-0">Parcial · falta {fmtBRL(it.pending)}</span>
+                              ) : (
+                                <span className="text-[10px] text-destructive shrink-0">{fmtBRL(it.pending)}</span>
+                              )}
                             </li>
                           ))}
                         </ul>

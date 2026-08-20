@@ -7,6 +7,8 @@ export interface StatementItem {
   name: string;
   qty: number;
   unit_price: number;
+  amount_paid: number;
+  amount_pending: number;
 }
 
 export interface StatementSale {
@@ -34,9 +36,10 @@ const W = 210;
 const MAX_Y = PAGE_H - 18;
 
 const C_DESC  = MARGIN + 4;
-const C_QTY   = 116;
-const C_UNIT  = 148;
-const C_LINE  = 178;
+const C_QTY   = 96;
+const C_UNIT  = 120;
+const C_PAID  = 152;
+const C_PEND  = 182;
 const C_RIGHT = W - MARGIN;
 
 export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
@@ -101,7 +104,8 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
   doc.text('PRODUTO', C_DESC, y);
   doc.text('QTD', C_QTY, y, { align: 'right' });
   doc.text('UNIT.', C_UNIT, y, { align: 'right' });
-  doc.text('SUBTOTAL', C_LINE, y, { align: 'right' });
+  doc.text('RECEBIDO', C_PAID, y, { align: 'right' });
+  doc.text('A RECEBER', C_PEND, y, { align: 'right' });
   doc.setTextColor(0);
   y += 5;
   doc.setDrawColor(220); doc.line(MARGIN, y - 1, C_RIGHT, y - 1);
@@ -134,11 +138,15 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
     for (const it of items) {
       checkY(6);
-      const name = (doc.splitTextToSize(it.name, 88) as string[])[0];
+      const name = (doc.splitTextToSize(it.name, 68) as string[])[0];
       doc.text(name, C_DESC, y);
       doc.text(String(it.qty), C_QTY, y, { align: 'right' });
       doc.text(fmt(it.unit_price), C_UNIT, y, { align: 'right' });
-      doc.text(fmt(it.qty * it.unit_price), C_LINE, y, { align: 'right' });
+      doc.setTextColor(22, 163, 74);
+      doc.text(fmt(it.amount_paid), C_PAID, y, { align: 'right' });
+      doc.setTextColor(it.amount_pending > 0 ? 200 : 0, it.amount_pending > 0 ? 30 : 0, it.amount_pending > 0 ? 30 : 0);
+      doc.text(fmt(it.amount_pending), C_PEND, y, { align: 'right' });
+      doc.setTextColor(0);
       y += 5;
     }
 
@@ -147,7 +155,7 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
     doc.setFontSize(7.5); doc.setTextColor(80);
     doc.text('Total da venda:', 102, y, { align: 'right' });
     doc.setTextColor(0);
-    doc.text(fmt(s.net_total), C_LINE, y, { align: 'right' });
+    doc.text(fmt(s.net_total), C_PEND, y, { align: 'right' });
     y += 4.5;
 
     if (s.amount_paid > 0) {
@@ -155,7 +163,7 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
       doc.setTextColor(80);
       doc.text('Já recebido:', 102, y, { align: 'right' });
       doc.setTextColor(22, 163, 74);
-      doc.text(fmt(s.amount_paid), C_LINE, y, { align: 'right' });
+      doc.text(fmt(s.amount_paid), C_PEND, y, { align: 'right' });
       doc.setTextColor(0);
       y += 4.5;
     }
@@ -164,7 +172,7 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
     doc.setTextColor(200, 30, 30);
     doc.text('Pendente:', 102, y, { align: 'right' });
-    doc.text(fmt(s.amount_pending), C_LINE, y, { align: 'right' });
+    doc.text(fmt(s.amount_pending), C_PEND, y, { align: 'right' });
     doc.setTextColor(0); doc.setFont('helvetica', 'normal');
     y += 3;
 

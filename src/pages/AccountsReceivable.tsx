@@ -11,7 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import PageHeader from '@/components/PageHeader';
 import { ShimmerList } from '@/components/ShimmerSkeleton';
 import BatchSettlePaymentDialog from '@/components/BatchSettlePaymentDialog';
-import { Wallet, Clock, AlertCircle, DollarSign, Search, Users, ChevronRight, ChevronDown, ChevronUp, Inbox, Package, DollarSign as DollarIcon, FileText, MessageCircle, Download } from 'lucide-react';
+import ItemSettlePaymentDialog, { type SettleSaleGroup } from '@/components/ItemSettlePaymentDialog';
+import { Wallet, Clock, AlertCircle, DollarSign, Search, Users, ChevronRight, ChevronDown, ChevronUp, Inbox, Package, DollarSign as DollarIcon, FileText, MessageCircle, Download, ListChecks } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import EmployeeFilter from '@/components/EmployeeFilter';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -23,6 +24,7 @@ import { downloadCsv } from '@/lib/receipt';
 import { toast } from 'sonner';
 
 interface SaleItemLite {
+  id: string;
   qty: number;
   unit_price: number;
   product_name_snapshot: string | null;
@@ -131,7 +133,10 @@ export default function AccountsReceivable() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [sellerId, setSellerId] = useState<string | null>(null);
+  const [paymentModeOpen, setPaymentModeOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [itemSettleOpen, setItemSettleOpen] = useState(false);
+  const [itemPaid, setItemPaid] = useState<Record<string, number>>({});
   const [statementOpen, setStatementOpen] = useState(false);
   const [statementScope, setStatementScope] = useState<'all' | 'overdue'>('all');
   const [statementAction, setStatementAction] = useState<'pdf' | 'whatsapp'>('pdf');
@@ -151,7 +156,7 @@ export default function AccountsReceivable() {
     let q = supabase
       .from('sales')
       .select(
-        'id, created_at, net_total, amount_paid, amount_pending, payment_status, due_date, notes, customer_id, customers(name, phone), sale_items(qty, unit_price, product_name_snapshot, products(name))',
+        'id, created_at, net_total, amount_paid, amount_pending, payment_status, due_date, notes, customer_id, customers(name, phone), sale_items(id, qty, unit_price, product_name_snapshot, products(name))',
       )
       .eq('store_id', profile.store_id)
       .is('deleted_at', null)
@@ -225,6 +230,53 @@ export default function AccountsReceivable() {
   }, [visibleGroups, selectedId]);
 
   const selected = visibleGroups.find((g) => g.id === selectedId) || null;
+
+  // Soma de payment_allocations por item, só para os itens do cliente
+  // selecionado (recarrega ao trocar de cliente ou depois de uma baixa).
+  useEffect(() => {
+    const itemIds = (selected?.sales || []).flatMap((s) => (s.sale_items || []).map((it) => it.id));
+    if (itemIds.length === 0) {
+      setItemPaid({});
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from('payment_allocations')
+      .select('sale_item_id, amount')
+      .in('sale_item_id', itemIds)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const map: Record<string, number> = {};
+        for (const row of data || []) {
+          map[row.sale_item_id] = (map[row.sale_item_id] || 0) + Number(row.amount);
+        }
+        setItemPaid(map);
+      });
+    return () => { cancelled = true; };
+  }, [selected?.id, selected?.sales]);
+
+  const itemBalance = (it: SaleItemLite): number => {
+    const lineTotal = it.qty * it.unit_price;
+    return Math.max(0, lineTotal - (itemPaid[it.id] || 0));
+  };
+
+  const itemSettleGroups: SettleSaleGroup[] = (selected?.sales || [])
+    .map((s) => ({
+      id: s.id,
+      created_at: s.created_at,
+      due_date: s.due_date,
+      items: (s.sale_items || [])
+        .map((it) => ({
+          id: it.id,
+          name: itemName(it),
+          qty: it.qty,
+          line_total: it.qty * it.unit_price,
+          paid: itemPaid[it.id] || 0,
+          balance: itemBalance(it),
+        }))
+        .filter((it) => it.balance > 0 || it.paid > 0),
+    }))
+    .filter((s) => s.items.length > 0);
 
   const exportCsv = () => {
     if (!selected || selected.sales.length === 0) return;
@@ -353,17 +405,38 @@ export default function AccountsReceivable() {
       <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase bg-muted/40">
         <span className="flex-1">Produto</span>
         <span className="w-10 text-right shrink-0">Qtd</span>
-        <span className="w-20 text-right shrink-0">Unit.</span>
-        <span className="w-20 text-right shrink-0">Subtotal</span>
+        <span className="w-20 text-right shrink-0">Total</span>
+        <span className="w-20 text-right shrink-0">Recebido</span>
+        <span className="w-20 text-right shrink-0">A receber</span>
+        <span className="w-16 text-center shrink-0">Status</span>
       </div>
-      {items.map((it, idx) => (
-        <div key={idx} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-          <span className="flex-1 min-w-0 break-words">{itemName(it)}</span>
-          <span className="w-10 text-right shrink-0 text-muted-foreground">{it.qty}</span>
-          <span className="w-20 text-right shrink-0 text-muted-foreground">{fmt(it.unit_price)}</span>
-          <span className="w-20 text-right shrink-0 font-medium">{fmt(it.qty * it.unit_price)}</span>
-        </div>
-      ))}
+      {items.map((it, idx) => {
+        const lineTotal = it.qty * it.unit_price;
+        const paid = itemPaid[it.id] || 0;
+        const balance = itemBalance(it);
+        const status = balance <= 0 ? 'Pago' : paid > 0 ? 'Parcial' : 'Pendente';
+        return (
+          <div key={idx} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+            <span className="flex-1 min-w-0 break-words">{itemName(it)}</span>
+            <span className="w-10 text-right shrink-0 text-muted-foreground">{it.qty}</span>
+            <span className="w-20 text-right shrink-0 font-medium">{fmt(lineTotal)}</span>
+            <span className="w-20 text-right shrink-0 text-emerald-600">{fmt(paid)}</span>
+            <span className="w-20 text-right shrink-0 font-semibold text-destructive">{fmt(balance)}</span>
+            <span className="w-16 text-center shrink-0">
+              <Badge
+                className={cn(
+                  'text-[9px] px-1.5 py-0',
+                  balance <= 0
+                    ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                    : 'bg-destructive/10 text-destructive border border-destructive/20',
+                )}
+              >
+                {status}
+              </Badge>
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -433,7 +506,7 @@ export default function AccountsReceivable() {
               </>
             )}
             {canBatchSettle && selected.sales.length > 0 && (
-              <Button size="lg" className="h-12" onClick={() => setBatchOpen(true)}>
+              <Button size="lg" className="h-12" onClick={() => setPaymentModeOpen(true)}>
                 <DollarIcon className="h-4 w-4 mr-1.5" />
                 Lançar pagamento
               </Button>
@@ -702,6 +775,39 @@ export default function AccountsReceivable() {
         </div>
       )}
 
+      <Dialog open={paymentModeOpen} onOpenChange={setPaymentModeOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Lançar pagamento — {selected?.name || ''}</DialogTitle>
+            <DialogDescription>Como você quer dar baixa?</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => { setPaymentModeOpen(false); setBatchOpen(true); }}
+              className="flex flex-col items-center gap-2 rounded-lg border p-4 text-center hover:bg-muted/50 hover:border-primary/40 transition-colors"
+            >
+              <DollarIcon className="h-6 w-6 text-primary" />
+              <span className="text-sm font-medium">Por valor</span>
+              <span className="text-[11px] text-muted-foreground">
+                Informe um valor total e o sistema distribui nas contas mais antigas.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPaymentModeOpen(false); setItemSettleOpen(true); }}
+              className="flex flex-col items-center gap-2 rounded-lg border p-4 text-center hover:bg-muted/50 hover:border-primary/40 transition-colors"
+            >
+              <ListChecks className="h-6 w-6 text-primary" />
+              <span className="text-sm font-medium">Por item</span>
+              <span className="text-[11px] text-muted-foreground">
+                Escolha as peças específicas que o cliente está pagando.
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <BatchSettlePaymentDialog
         customerName={selected?.name || ''}
         sales={(selected?.sales || []).map((s) => ({
@@ -713,6 +819,14 @@ export default function AccountsReceivable() {
         }))}
         open={batchOpen}
         onOpenChange={setBatchOpen}
+        onSettled={fetchData}
+      />
+
+      <ItemSettlePaymentDialog
+        customerName={selected?.name || ''}
+        sales={itemSettleGroups}
+        open={itemSettleOpen}
+        onOpenChange={setItemSettleOpen}
         onSettled={fetchData}
       />
 
@@ -784,6 +898,8 @@ export default function AccountsReceivable() {
                   name: itemName(it),
                   qty: it.qty,
                   unit_price: Number(it.unit_price),
+                  amount_paid: itemPaid[it.id] || 0,
+                  amount_pending: itemBalance(it),
                 })),
               }));
 
