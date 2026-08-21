@@ -348,7 +348,11 @@ export default function NewSale() {
       discount,
       items: items.map(i => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price })),
       payments: cleanPayments,
-      delivery: deliveryMethod === 'pickup' ? null : { method: deliveryMethod, shipping_fee: shippingFee, delivery_cost: 0 },
+      // Frete é somado ao total independente do método de entrega (o campo
+      // fica sempre visível na tela, mesmo em "Retirada") — só omitimos o
+      // delivery quando não há nada a registrar (retirada sem frete), pra
+      // não criar uma linha em deliveries pra toda venda balcão comum.
+      delivery: (deliveryMethod === 'pickup' && shippingFee <= 0) ? null : { method: deliveryMethod, shipping_fee: shippingFee, delivery_cost: 0 },
       due_date: hasPending && dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
       sale_date: saleDateISO,
       notes: notes.trim() ? notes.trim().slice(0, 1000) : null,
