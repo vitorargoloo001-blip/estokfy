@@ -1,4 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   AlertCircle, CheckCircle2, Clock, RefreshCw, Plug2, Building2,
-  Trash2, RotateCcw, Wifi, WifiOff, Info, ExternalLink, ShieldCheck, Upload, FileUp,
+  Trash2, RotateCcw, Wifi, WifiOff, ShieldCheck, Upload, FileUp,
   Webhook, Copy, KeyRound,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +23,17 @@ import { parseStatementFile, type ParsedTransaction } from "@/lib/statementParse
 
 const fmtDateTime = (d: string | null) =>
   d ? new Date(d).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "Nunca";
+
+const fmtCurrency = (v: number | null | undefined) =>
+  v == null ? null : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+// Mostra só os últimos 4 dígitos — número completo não precisa aparecer na tela.
+const maskAccountNumber = (num: string | null | undefined) => {
+  if (!num) return "";
+  const digits = num.replace(/\D/g, "");
+  if (digits.length <= 4) return num;
+  return `•••• ${digits.slice(-4)}`;
+};
 
 const PLUGGY_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
   updated:            { label: "Sincronizado",    color: "bg-green-100 text-green-800", icon: CheckCircle2 },
@@ -60,6 +73,33 @@ export default function ConnectBankConnections() {
     createManualConnection, creatingManual, importStatement, importingStatement,
     createItauDirectConnection, creatingItauDirect, getItauWebhookSecret, regenerateItauWebhookSecret,
   } = usePluggyConnection();
+
+  const { canManageConnect } = usePermissions();
+
+  // Contagem de conciliações/pendências por conexão -- mesma tabela que a
+  // tela de Conciliação já usa, só agrupada aqui pra mostrar por banco.
+  const [reconCounts, setReconCounts] = useState<Record<string, { reconciled: number; pending: number }>>({});
+  useEffect(() => {
+    const ids = connections.map((c) => c.id);
+    if (ids.length === 0) { setReconCounts({}); return; }
+    let cancelled = false;
+    supabase
+      .from("bank_transactions")
+      .select("bank_connection_id, status")
+      .in("bank_connection_id", ids)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const counts: Record<string, { reconciled: number; pending: number }> = {};
+        for (const row of data ?? []) {
+          const key = row.bank_connection_id as string;
+          counts[key] ??= { reconciled: 0, pending: 0 };
+          if (row.status === "reconciled") counts[key].reconciled++;
+          else if (row.status === "pending") counts[key].pending++;
+        }
+        setReconCounts(counts);
+      });
+    return () => { cancelled = true; };
+  }, [connections]);
 
   const [confirmDisconnect, setConfirmDisconnect] = useState<{
     id: string;
@@ -186,7 +226,7 @@ export default function ConnectBankConnections() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Bancos Conectados</h2>
           <p className="text-muted-foreground mt-1">
-            Conecte via Pluggy (automático) ou importe o extrato manualmente (OFX/CSV, sem depender de terceiros).
+            Conecte seu banco automaticamente ou importe o extrato manualmente (OFX/CSV).
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -194,19 +234,23 @@ export default function ConnectBankConnections() {
             <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
-          <Button variant="outline" onClick={() => setShowAddManual(true)}>
-            <FileUp className="h-4 w-4 mr-2" />
-            Adicionar banco manual
-          </Button>
-          <Button variant="outline" onClick={() => setShowAddItau(true)}>
-            <Webhook className="h-4 w-4 mr-2" />
-            Conectar Itaú direto
-          </Button>
-          <Button onClick={openWidget} disabled={connecting}>
-            {connecting
-              ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Conectando...</>
-              : <><Plug2 className="h-4 w-4 mr-2" />Conectar banco</>}
-          </Button>
+          {canManageConnect && (
+            <>
+              <Button variant="outline" onClick={() => setShowAddManual(true)}>
+                <FileUp className="h-4 w-4 mr-2" />
+                Adicionar banco manual
+              </Button>
+              <Button variant="outline" onClick={() => setShowAddItau(true)}>
+                <Webhook className="h-4 w-4 mr-2" />
+                Conectar Itaú direto
+              </Button>
+              <Button onClick={openWidget} disabled={connecting}>
+                {connecting
+                  ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Conectando...</>
+                  : <><Plug2 className="h-4 w-4 mr-2" />Conectar banco</>}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -224,7 +268,7 @@ export default function ConnectBankConnections() {
           <div className="flex items-start gap-3 text-sm text-blue-900">
             <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0 text-blue-600" />
             <div>
-              <span className="font-medium">Conexão segura via Pluggy.</span>{" "}
+              <span className="font-medium">Conexão bancária segura.</span>{" "}
               Suas credenciais bancárias nunca são armazenadas pelo Estokfy.
               A integração usa leitura somente — sem acesso a transferências ou pagamentos.
             </div>
@@ -256,20 +300,22 @@ export default function ConnectBankConnections() {
             <div>
               <h3 className="text-lg font-semibold">Nenhum banco conectado</h3>
               <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
-                Conecte via <strong>Pluggy</strong> (sincronização automática) ou clique em{" "}
+                Conecte automaticamente (sincronização automática) ou clique em{" "}
                 <strong>Adicionar banco manual</strong> para importar o extrato (OFX/CSV).
               </p>
             </div>
-            <div className="flex gap-2 justify-center">
-              <Button variant="outline" onClick={() => setShowAddManual(true)}>
-                <FileUp className="h-4 w-4 mr-2" />
-                Adicionar banco manual
-              </Button>
-              <Button onClick={openWidget} disabled={connecting}>
-                <Plug2 className="h-4 w-4 mr-2" />
-                Conectar banco
-              </Button>
-            </div>
+            {canManageConnect && (
+              <div className="flex gap-2 justify-center">
+                <Button variant="outline" onClick={() => setShowAddManual(true)}>
+                  <FileUp className="h-4 w-4 mr-2" />
+                  Adicionar banco manual
+                </Button>
+                <Button onClick={openWidget} disabled={connecting}>
+                  <Plug2 className="h-4 w-4 mr-2" />
+                  Conectar banco
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -315,75 +361,96 @@ export default function ConnectBankConnections() {
                 </div>
 
                 {/* Ações do item */}
-                <div className="flex gap-2 flex-wrap">
-                  {isManual ? (
+                {canManageConnect && (
+                  <div className="flex gap-2 flex-wrap">
+                    {isManual ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => triggerImport(primary.id)}
+                        disabled={isImporting}
+                      >
+                        <Upload className={`h-3.5 w-3.5 mr-1 ${isImporting ? "animate-pulse" : ""}`} />
+                        {isImporting ? "Importando..." : "Importar extrato"}
+                      </Button>
+                    ) : isItauDirect ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleViewWebhook(primary.id)}
+                      >
+                        <KeyRound className="h-3.5 w-3.5 mr-1" />
+                        Ver webhook
+                      </Button>
+                    ) : isError ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-yellow-300 text-yellow-700 hover:bg-yellow-50"
+                        onClick={() => itemId && reconnect(itemId)}
+                        disabled={connecting}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                        Reconectar
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => syncNow(itemId ?? undefined)}
+                        disabled={isSyncing}
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
+                        {isSyncing ? "Sincronizando..." : "Sincronizar agora"}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={() => triggerImport(primary.id)}
-                      disabled={isImporting}
+                      variant="ghost"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => setConfirmDisconnect({
+                        id:            primary.id,
+                        name:          primary.institution_name ?? primary.bank_name,
+                        pluggyItemDbId: primary.pluggy_item_id ?? null,
+                      })}
                     >
-                      <Upload className={`h-3.5 w-3.5 mr-1 ${isImporting ? "animate-pulse" : ""}`} />
-                      {isImporting ? "Importando..." : "Importar extrato"}
+                      <WifiOff className="h-3.5 w-3.5 mr-1" />
+                      Desconectar
                     </Button>
-                  ) : isItauDirect ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleViewWebhook(primary.id)}
-                    >
-                      <KeyRound className="h-3.5 w-3.5 mr-1" />
-                      Ver webhook
-                    </Button>
-                  ) : isError ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-yellow-300 text-yellow-700 hover:bg-yellow-50"
-                      onClick={() => itemId && reconnect(itemId)}
-                      disabled={connecting}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                      Reconectar
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => syncNow(itemId ?? undefined)}
-                      disabled={isSyncing}
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
-                      {isSyncing ? "Sincronizando..." : "Sincronizar agora"}
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={() => setConfirmDisconnect({
-                      id:            primary.id,
-                      name:          primary.institution_name ?? primary.bank_name,
-                      pluggyItemDbId: primary.pluggy_item_id ?? null,
-                    })}
-                  >
-                    <WifiOff className="h-3.5 w-3.5 mr-1" />
-                    Desconectar
-                  </Button>
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* Info de sincronização */}
-              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
                 <span>
                   Última sincronização:{" "}
                   <span className="font-medium">{fmtDateTime(primary.last_synced_at ?? primary.last_sync_at)}</span>
                 </span>
                 {primary.total_transactions > 0 && (
                   <span>
-                    {primary.total_transactions} transação(ões) total
+                    {primary.total_transactions} transação(ões) importada(s)
                   </span>
                 )}
+                {(() => {
+                  const totals = group.reduce(
+                    (acc, c) => {
+                      const rc = reconCounts[c.id];
+                      if (rc) { acc.reconciled += rc.reconciled; acc.pending += rc.pending; }
+                      return acc;
+                    },
+                    { reconciled: 0, pending: 0 },
+                  );
+                  if (totals.reconciled === 0 && totals.pending === 0) return null;
+                  return (
+                    <>
+                      <span className="text-emerald-600">{totals.reconciled} conciliação(ões) realizada(s)</span>
+                      {totals.pending > 0 && (
+                        <span className="text-amber-600">{totals.pending} pendência(s)</span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </CardHeader>
 
@@ -402,7 +469,7 @@ export default function ConnectBankConnections() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {conn.agency ? `Ag. ${conn.agency} · ` : ""}
-                          Cc. {conn.account_number}
+                          Cc. {maskAccountNumber(conn.account_number)}
                         </p>
                       </div>
                     </div>
@@ -410,21 +477,26 @@ export default function ConnectBankConnections() {
                       {conn.last_sync_status === "failed" && (
                         <Badge variant="destructive" className="text-xs">Falhou</Badge>
                       )}
+                      {fmtCurrency(conn.balance) != null && (
+                        <span className="text-sm font-semibold">{fmtCurrency(conn.balance)}</span>
+                      )}
                       <span className="text-xs text-muted-foreground">
                         {fmtDateTime(conn.last_sync_at)}
                       </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs text-muted-foreground hover:text-destructive"
-                        onClick={() => setConfirmDisconnect({
-                          id:            conn.id,
-                          name:          `conta ${conn.account_number}`,
-                          pluggyItemDbId: null, // remove só esta conta
-                        })}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
+                      {canManageConnect && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                          onClick={() => setConfirmDisconnect({
+                            id:            conn.id,
+                            name:          `conta ${conn.account_number}`,
+                            pluggyItemDbId: null, // remove só esta conta
+                          })}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -434,47 +506,15 @@ export default function ConnectBankConnections() {
         );
       })}
 
-      {/* Legenda / instrução de webhook */}
-      {!loading && (
+      {/* Legenda */}
+      {!loading && groups.length > 0 && (
         <Card className="bg-muted/30">
           <CardContent className="pt-4 pb-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-muted-foreground">
-              <div className="flex items-start gap-2">
-                <Wifi className="h-3.5 w-3.5 mt-0.5 shrink-0 text-green-600" />
-                <div>
-                  <p className="font-medium text-foreground">Sincronização automática</p>
-                  <p>Pluggy notifica o Estokfy via webhook quando novas transações estão disponíveis.</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-600" />
-                <div>
-                  <p className="font-medium text-foreground">Webhook URL</p>
-                  <p className="font-mono break-all">
-                    {import.meta.env.VITE_SUPABASE_URL}/functions/v1/pluggy-webhook
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <ExternalLink className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground">Configurar Pluggy</p>
-                  <p>
-                    Adicione o webhook no{" "}
-                    <a
-                      href="https://dashboard.pluggy.ai"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      Pluggy Dashboard
-                    </a>
-                    {" "}e defina{" "}
-                    <code className="text-xs">PLUGGY_CLIENT_ID</code>,{" "}
-                    <code className="text-xs">PLUGGY_CLIENT_SECRET</code> e{" "}
-                    <code className="text-xs">PLUGGY_WEBHOOK_SECRET</code> nas env vars da Edge Function.
-                  </p>
-                </div>
+            <div className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Wifi className="h-3.5 w-3.5 mt-0.5 shrink-0 text-green-600" />
+              <div>
+                <p className="font-medium text-foreground">Sincronização automática</p>
+                <p>O Estokfy Connect é notificado automaticamente quando novas transações estão disponíveis.</p>
               </div>
             </div>
           </CardContent>

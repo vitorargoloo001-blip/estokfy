@@ -149,6 +149,13 @@ Deno.serve(async (req: Request) => {
       const bankConnId = bankConnectionIds[accounts.indexOf(account)] ?? bankConnectionIds[0];
       if (!bankConnId) continue;
 
+      // Saldo já vem no /accounts que buscamos acima -- só grava, sem
+      // chamada nova à Pluggy.
+      const accountBalance = account.balance as number | undefined;
+      if (typeof accountBalance === "number") {
+        await supabase.from("bank_connections").update({ balance: accountBalance }).eq("id", bankConnId);
+      }
+
       let page = 1;
       let hasMore = true;
 

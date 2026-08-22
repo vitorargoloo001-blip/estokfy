@@ -27,6 +27,7 @@ export interface BankConnectionPluggy {
   institution_name: string | null;
   last_synced_at: string | null;
   provider: string;
+  balance: number | null;
 }
 
 export interface PluggyWidgetCallbacks {
@@ -118,7 +119,7 @@ export function usePluggyConnection() {
       // 1. Obter connect token
       const tokenData = await callEdgeFunction(
         "pluggy-connect-token",
-        {},
+        { origin: window.location.origin },
         session.access_token
       ) as { connectToken: string };
 
@@ -219,7 +220,7 @@ export function usePluggyConnection() {
 
       const tokenData = await callEdgeFunction(
         "pluggy-connect-token",
-        {},
+        { origin: window.location.origin },
         session.access_token
       ) as { connectToken: string };
 

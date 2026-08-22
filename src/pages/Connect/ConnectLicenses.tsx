@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { AlertCircle, Check, Lock, Pause, Trash2, Zap, RefreshCw, History, Plus, Loader2, Search } from "lucide-react";
+import { AlertCircle, Check, Lock, Pause, Trash2, Zap, RefreshCw, History, Plus, Loader2, Search, PlugZap } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useMasterUser } from "@/hooks/useMasterUser";
 import { useAuth } from "@/contexts/AuthContext";
@@ -109,6 +109,17 @@ export default function ConnectLicenses() {
   }, []);
 
   useEffect(() => { if (isMaster) load(); }, [isMaster, load]);
+
+  // Status de configuração da Pluggy -- item 14: nunca deixar o erro técnico
+  // de "credenciais não configuradas" ser a única forma de descobrir isso.
+  const [pluggyStatus, setPluggyStatus] = useState<{ configured: boolean; webhookConfigured: boolean } | "error" | null>(null);
+  useEffect(() => {
+    if (!isMaster) return;
+    supabase.functions.invoke("pluggy-config-status").then(({ data, error: fnErr }) => {
+      if (fnErr || !data) { setPluggyStatus("error"); return; }
+      setPluggyStatus(data as { configured: boolean; webhookConfigured: boolean });
+    });
+  }, [isMaster]);
 
   // Auto-recompute expiry when plan/start changes (except vitalício)
   useEffect(() => {
@@ -218,6 +229,26 @@ export default function ConnectLicenses() {
         <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Zap className="h-6 w-6" /> Gestão de Licenças do Connect</h2>
         <p className="text-muted-foreground mt-1">Ative ou desative o Estokfy Connect em qualquer loja</p>
       </div>
+
+      {/* Status da integração bancária (Pluggy) -- infraestrutura, não licença por loja */}
+      {pluggyStatus && pluggyStatus !== "error" && (
+        <Card className={pluggyStatus.configured ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}>
+          <CardContent className="pt-3 pb-3 flex items-center gap-2 text-sm">
+            <PlugZap className={`h-4 w-4 shrink-0 ${pluggyStatus.configured ? "text-green-600" : "text-amber-600"}`} />
+            {pluggyStatus.configured ? (
+              <span className="text-green-900">
+                Pluggy configurada — conexão bancária automática disponível para as lojas.
+                {!pluggyStatus.webhookConfigured && " (webhook secret ausente — verificação de assinatura desabilitada, funciona mas não é o ideal)"}
+              </span>
+            ) : (
+              <span className="text-amber-900">
+                Pluggy não configurada — "Conectar Banco" não funciona ainda para nenhuma loja.
+                Defina PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET nas variáveis de ambiente das Edge Functions.
+              </span>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

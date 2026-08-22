@@ -249,14 +249,21 @@ async function runSync(
     const accounts = (item.accounts_json as Array<{ id: string }>) ?? [];
     const bankConnIds = (item.bank_connection_ids as string[]) ?? [];
 
-    // Se não há accounts_json, tentar buscar da API
-    let accountList = accounts;
-    if (accountList.length === 0) {
+    // Busca /accounts fresco a cada sync -- accounts_json só é o snapshot da
+    // conexão inicial, e o saldo muda com o tempo. Mesma chamada que já era
+    // feita como fallback quando accounts_json vinha vazio, só que agora
+    // sempre, pra manter bank_connections.balance atualizado.
+    let freshAccounts: Array<{ id: string; balance?: number }> = [];
+    try {
       const resp = await pluggyGet(apiKey, `/accounts?itemId=${item.pluggy_item_id}`) as {
-        results: Array<{ id: string }>;
+        results: Array<{ id: string; balance?: number }>;
       };
-      accountList = resp.results ?? [];
+      freshAccounts = resp.results ?? [];
+    } catch (e) {
+      console.warn(`[sync] falha ao buscar /accounts pra saldo (item=${item.pluggy_item_id}):`, e);
     }
+    const balanceById = new Map(freshAccounts.map((a) => [a.id, a.balance]));
+    const accountList = accounts.length > 0 ? accounts : freshAccounts;
 
     let itemImported = 0;
     let itemNew      = 0;
@@ -265,6 +272,11 @@ async function runSync(
       const account    = accountList[ai];
       const bankConnId = bankConnIds[ai] ?? bankConnIds[0];
       if (!bankConnId || !account?.id) continue;
+
+      const freshBalance = balanceById.get(account.id);
+      if (typeof freshBalance === "number") {
+        await supabase.from("bank_connections").update({ balance: freshBalance }).eq("id", bankConnId);
+      }
 
       const { imported, newCount } = await syncAccountTransactions(
         supabase, apiKey, storeId,

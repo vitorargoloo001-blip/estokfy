@@ -80,18 +80,38 @@ Deno.serve(async (req: Request) => {
 
   const event      = (payload.event as string) ?? "";
   const pluggyItemId = (payload.itemId ?? (payload.data as Record<string, unknown>)?.itemId) as string;
+  const eventId    = (payload.eventId as string) ?? null;
 
-  console.log(`[pluggy-webhook] event=${event} itemId=${pluggyItemId}`);
+  console.log(`[pluggy-webhook] event=${event} itemId=${pluggyItemId} eventId=${eventId}`);
+
+  // ── Idempotência: evento repetido (reentrega da Pluggy) vira no-op ──
+  // Antes disso só era absorvido indiretamente a jusante (via
+  // bank_reference UNIQUE em bank_transactions), sem travar de verdade a
+  // reentrega do próprio webhook.
+  if (eventId) {
+    const { data: existing } = await supabase
+      .from("pluggy_webhooks")
+      .select("id")
+      .eq("pluggy_event_id", eventId)
+      .maybeSingle();
+    if (existing) {
+      console.log(`[pluggy-webhook] eventId=${eventId} já processado — ignorando reentrega`);
+      return new Response(JSON.stringify({ received: true, action: "duplicate_event_ignored" }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
 
   // ── Registrar webhook no banco ────────────────────────────────────
   const { error: logErr } = await supabase
     .from("pluggy_webhooks")
     .insert({
-      pluggy_item_id: pluggyItemId,
-      event_type:     event,
-      payload:        payload,
-      processed:      false,
-      received_at:    new Date().toISOString(),
+      pluggy_item_id:  pluggyItemId,
+      pluggy_event_id: eventId,
+      event_type:      event,
+      payload:         payload,
+      processed:       false,
+      received_at:     new Date().toISOString(),
     });
 
   if (logErr) {

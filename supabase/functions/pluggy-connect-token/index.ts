@@ -74,15 +74,33 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // origin opcional vindo do frontend (dev local etc.) — produção é fixa.
+    let origin = "https://estokfy.pages.dev";
+    try {
+      const body = await req.json();
+      if (typeof body?.origin === "string" && /^https:\/\//.test(body.origin)) {
+        origin = body.origin;
+      }
+    } catch { /* body vazio é o caso normal (usePluggyConnection não manda nada) */ }
+
     // Obter API key da Pluggy (curta duração, ~30 min)
     const apiKey = await getPluggyApiKey(clientId, clientSecret);
 
-    // Criar connect token (válido para o widget)
+    // Criar connect token (válido para o widget). webhookUrl deixa a própria
+    // Pluggy notificar pluggy-webhook por item; avoidDuplicates impede
+    // conectar a mesma conta duas vezes; oauthRedirectUri é pra onde o banco
+    // manda o usuário de volta quando a instituição exige redirect completo
+    // (em vez de rodar tudo dentro do widget) — aponta pra /connect/bancos,
+    // rota autenticada que já existe, então sessão e store_id não se perdem
+    // (é same-origin, o token do Supabase já fica salvo no browser).
     const connectRes = await fetch(`${PLUGGY_API}/connect_tokens`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-KEY": apiKey },
       body: JSON.stringify({
         clientUserId: profile.store_id, // identificador único do tenant
+        webhookUrl: `${Deno.env.get("SUPABASE_URL")}/functions/v1/pluggy-webhook`,
+        avoidDuplicates: true,
+        oauthRedirectUri: `${origin}/connect/bancos`,
       }),
     });
 
