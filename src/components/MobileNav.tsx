@@ -1,12 +1,13 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Package, ShoppingCart, Boxes, DollarSign, Menu, X, Tag, Clock, Shield, Zap, Download, Wallet } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Boxes, DollarSign, Menu, X, Tag, Clock, Shield, Zap, Download, Wallet, Landmark, Banknote, ArrowLeftRight, AlertTriangle, ScrollText } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useSuperAdmin } from '@/hooks/useSuperAdmin';
+import { useConnectModuleAccess } from '@/hooks/useConnectModuleAccess';
 import { Button } from '@/components/ui/button';
 import { Sun, Moon, LogOut, Users, Truck, RotateCcw, BarChart3, Settings } from 'lucide-react';
 
@@ -30,6 +31,18 @@ const moreItems = [
   { to: '/pixel', icon: Zap, label: 'Estokfy Pixel' },
 ];
 
+// Estokfy Connect — só aparece quando o módulo `connect` da loja está ativo
+// (mesmo gate de AppSidebar.tsx/RequireConnectModule: "menu aparece ⟺ página abre").
+const connectItems = [
+  { to: '/connect', icon: LayoutDashboard, label: 'Visão Geral' },
+  { to: '/connect/bancos', icon: Landmark, label: 'Bancos' },
+  { to: '/connect/transacoes', icon: Banknote, label: 'Transações' },
+  { to: '/connect/conciliacao', icon: ArrowLeftRight, label: 'Conciliação' },
+  { to: '/connect/divergencias', icon: AlertTriangle, label: 'Divergências' },
+  { to: '/connect/auditoria', icon: ScrollText, label: 'Auditoria' },
+  { to: '/connect/configuracoes', icon: Settings, label: 'Configurações' },
+];
+
 export default function MobileNav() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -37,6 +50,7 @@ export default function MobileNav() {
   const { profile, signOut } = useAuth();
   const { dark, toggle } = useTheme();
   const { isSuperAdmin } = useSuperAdmin();
+  const { canAccess: connectEnabled } = useConnectModuleAccess();
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   useEffect(() => {
@@ -67,7 +81,9 @@ export default function MobileNav() {
   };
 
   const isActive = (path: string) =>
-    path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
+    path === '/' || path === '/connect'
+      ? location.pathname === path
+      : location.pathname.startsWith(path);
 
   return (
     <>
@@ -130,6 +146,28 @@ export default function MobileNav() {
               </button>
             ))}
           </div>
+          {connectEnabled && (
+            <div className="mt-4 pt-4 border-t">
+              <p className="text-xs font-semibold text-muted-foreground mb-3">Estokfy Connect</p>
+              <div className="grid grid-cols-3 gap-3">
+                {connectItems.map((item) => (
+                  <button
+                    key={item.to}
+                    onClick={() => { navigate(item.to); setMenuOpen(false); }}
+                    className={cn(
+                      'flex flex-col items-center gap-2 rounded-xl p-4 transition-colors',
+                      isActive(item.to)
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-muted/50 text-foreground hover:bg-muted'
+                    )}
+                  >
+                    <item.icon className="h-6 w-6" />
+                    <span className="text-xs font-medium">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {isSuperAdmin && (
             <button
               onClick={() => { navigate('/super-admin'); setMenuOpen(false); }}
