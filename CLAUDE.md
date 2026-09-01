@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## This is the canonical working directory
 
-This folder (`Sistema de Estoque (1)`) is the **only** copy of the Estokfy codebase that should be edited. There may be other local clones of the same GitHub repo (`vitorargoloo001-blip/estokfy`) lying around from earlier sessions — ignore them. All edits, commits, and pushes happen here. Before starting work, confirm `git remote -v` points to `vitorargoloo001-blip/estokfy` and `git status` matches what you expect; if you land in a different folder that also looks like this project, stop and reconcile before editing.
+This folder (`Desktop/Estokfy/estokfy`) is the **only** copy of the Estokfy codebase that should be edited. There may be other local clones of the same GitHub repo (`vitorargoloo001-blip/estokfy`) lying around from earlier sessions — ignore them. All edits, commits, and pushes happen here. Before starting work, confirm `git remote -v` points to `vitorargoloo001-blip/estokfy` and `git status` matches what you expect; if you land in a different folder that also looks like this project, stop and reconcile before editing.
 
 ## Deep documentation lives in `docs/`
 
