@@ -66,6 +66,7 @@ const FRIENDLY_ERRORS: Record<string, string> = {
   sem_itens: 'Adicione pelo menos um item.',
   valor_invalido: 'Valor inválido.',
   sem_divida_pendente: 'Este cliente não possui contas pendentes para abater.',
+  valor_devolucao_zero: 'Informe o valor da devolução (não pode ser zero) — confira o campo "Valor unit." de cada item.',
   cliente_obrigatorio_para_abatimento: 'Selecione o cliente para abater em dívida.',
   modo_invalido: 'Modo de destino do valor inválido.',
   modo_sobra_invalido: 'Modo de destino da sobra inválido.',
