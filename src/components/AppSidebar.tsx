@@ -26,6 +26,7 @@ import {
   Wrench,
   CreditCard,
   ArrowLeftRight,
+  FileText,
   Landmark,
   Banknote,
   AlertTriangle,
@@ -106,6 +107,7 @@ const sections: { label: string; items: { to: string; icon: any; label: string; 
     label: 'Plataforma',
     items: [
       { to: '/financeiro', icon: DollarSign, label: 'Financeiro' },
+      { to: '/fiscal', icon: FileText, label: 'Notas Fiscais' },
       { to: '/historico', icon: Clock, label: 'Histórico' },
       { to: '/pixel', icon: Zap, label: 'Estokfy Pixel' },
       { to: '/ajuda', icon: HelpCircle, label: 'Ajuda / Treinamento' },

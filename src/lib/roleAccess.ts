@@ -10,10 +10,13 @@ const ROLE_ROUTES: Record<AppRole, string[]> = {
   manager: ['/', '/relatorios', '/relatorios/compras', '/produtos', '/categorias', '/estoque',
     '/produtos-parados', '/vendas', '/contas-a-receber', '/contas-a-pagar', '/clientes',
     '/fidelidade', '/creditos', '/entregas', '/trocas', '/funcionarios', '/financeiro', '/historico',
-    '/pixel', '/os', '/connect', '/ai', '/ajuda'],
-  sales: ['/', '/vendas', '/clientes', '/fidelidade', '/creditos', '/entregas', '/trocas', '/contas-a-receber', '/os', '/ajuda'],
+    '/pixel', '/os', '/connect', '/ai', '/fiscal', '/ajuda'],
+  // vendedor entra em /fiscal, mas a RLS de fiscal_documents só devolve as
+  // notas ligadas às vendas que ele próprio criou, e os KPIs da loja ficam
+  // ocultos para esse papel.
+  sales: ['/', '/vendas', '/clientes', '/fidelidade', '/creditos', '/entregas', '/trocas', '/contas-a-receber', '/os', '/fiscal', '/ajuda'],
   stock: ['/', '/produtos', '/categorias', '/estoque', '/produtos-parados', '/relatorios/compras', '/os', '/ajuda'],
-  finance: ['/', '/contas-a-receber', '/contas-a-pagar', '/financeiro', '/relatorios', '/clientes', '/creditos', '/connect', '/os', '/ajuda'],
+  finance: ['/', '/contas-a-receber', '/contas-a-pagar', '/financeiro', '/relatorios', '/clientes', '/creditos', '/connect', '/os', '/fiscal', '/ajuda'],
   viewer: ['/', '/ajuda'],
 };
 

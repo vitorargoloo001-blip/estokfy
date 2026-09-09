@@ -6,13 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { DollarSign, Package, ShoppingCart, AlertTriangle, TrendingUp, Plus, Truck, ArrowRight, Boxes, RotateCcw, Search } from 'lucide-react';
+import { DollarSign, Package, ShoppingCart, AlertTriangle, TrendingUp, Plus, Truck, ArrowRight, Boxes, RotateCcw, Search, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { startOfTodayUTCISO, startOfMonthUTCISO, daysAgoStrBR, isoToDayBR, formatDayMonthBR } from '@/lib/dateBR';
 import SmartRecommendations from '@/components/SmartRecommendations';
 import TeamPerformanceCard from '@/components/TeamPerformanceCard';
 import SellerDashboard from '@/components/SellerDashboard';
 import { usePermissions } from '@/hooks/usePermissions';
+import { getFiscalSummary } from '@/lib/fiscalApi';
 
 // Recharts (~225KB) só é baixado quando o Dashboard renderiza
 const DailySalesBar = lazy(() => import('@/components/charts/DashboardCharts').then(m => ({ default: m.DailySalesBar })));
@@ -30,6 +31,9 @@ interface KPIs {
   overdueAmount: number;
   payableOverdueCount: number;
   payableOverdueAmount: number;
+  fiscalPending: number;
+  fiscalPendingAmount: number;
+  fiscalOverdue: number;
 }
 
 interface PendingDelivery {
@@ -45,7 +49,7 @@ export default function Dashboard() {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const { canViewFinancials, loading: permissionsLoading } = usePermissions();
-  const [kpis, setKpis] = useState<KPIs>({ totalProducts: 0, lowStock: 0, todaySales: 0, todayRevenue: 0, todayPending: 0, monthRevenue: 0, monthProfit: 0, overdueCount: 0, overdueAmount: 0, payableOverdueCount: 0, payableOverdueAmount: 0 });
+  const [kpis, setKpis] = useState<KPIs>({ totalProducts: 0, lowStock: 0, todaySales: 0, todayRevenue: 0, todayPending: 0, monthRevenue: 0, monthProfit: 0, overdueCount: 0, overdueAmount: 0, payableOverdueCount: 0, payableOverdueAmount: 0, fiscalPending: 0, fiscalPendingAmount: 0, fiscalOverdue: 0 });
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const [dailySales, setDailySales] = useState<{ day: string; total: number }[]>([]);
   const [profitByProduct, setProfitByProduct] = useState<{ name: string; profit: number }[]>([]);
@@ -113,7 +117,28 @@ export default function Dashboard() {
       const monthData = monthSalesRes.data || [];
       const monthProfit = monthData.reduce((s, r) => s + Number(r.profit_gross), 0);
 
-      setKpis({ totalProducts: productsRes.count || 0, lowStock: lowStockCount, todaySales: todaySalesRes.data?.length || 0, todayRevenue, todayPending, monthRevenue, monthProfit, overdueCount, overdueAmount, payableOverdueCount, payableOverdueAmount });
+      // Fiscal fica fora do Promise.all de propósito: a RPC é restrita a
+      // owner/admin/manager/finance e lança para os demais, então uma falha
+      // aqui não pode derrubar o dashboard inteiro.
+      let fiscalPending = 0, fiscalPendingAmount = 0, fiscalOverdue = 0;
+      try {
+        const fiscal = await getFiscalSummary(storeId);
+        if (fiscal) {
+          fiscalPending = fiscal.pending_count;
+          fiscalPendingAmount = fiscal.pending_amount;
+          fiscalOverdue = fiscal.overdue_count;
+          if (fiscalPending > 0) {
+            toast.warning(`${fiscalPending} nota(s) fiscal(is) pendente(s) de declaração`, { id: 'fiscal-pending-alert' });
+          }
+          if (fiscalOverdue > 0) {
+            toast.warning(`${fiscalOverdue} nota(s) pendente(s) há mais de ${fiscal.alert_days} dias`, { id: 'fiscal-overdue-alert' });
+          }
+        }
+      } catch {
+        // sem permissão fiscal ou módulo ainda não migrado — segue sem o card
+      }
+
+      setKpis({ totalProducts: productsRes.count || 0, lowStock: lowStockCount, todaySales: todaySalesRes.data?.length || 0, todayRevenue, todayPending, monthRevenue, monthProfit, overdueCount, overdueAmount, payableOverdueCount, payableOverdueAmount, fiscalPending, fiscalPendingAmount, fiscalOverdue });
       setRecentSales(recentRes.data || []);
 
       setPendingDeliveries((deliveriesRes.data || []).map((d: any) => ({
@@ -184,6 +209,7 @@ export default function Dashboard() {
     { title: 'A Receber Vencido', value: kpis.overdueCount.toString(), sub: kpis.overdueCount > 0 ? fmt(kpis.overdueAmount) : 'sem pendências', icon: AlertTriangle, accent: kpis.overdueCount > 0 ? 'from-rose-500/20 to-rose-400/5' : 'from-muted to-muted', iconBg: kpis.overdueCount > 0 ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400' : 'bg-muted text-muted-foreground', onClick: kpis.overdueCount > 0 ? () => navigate('/contas-a-receber') : undefined },
     { title: 'A Pagar Vencido', value: kpis.payableOverdueCount.toString(), sub: kpis.payableOverdueCount > 0 ? fmt(kpis.payableOverdueAmount) : 'em dia', icon: AlertTriangle, accent: kpis.payableOverdueCount > 0 ? 'from-rose-500/20 to-rose-400/5' : 'from-muted to-muted', iconBg: kpis.payableOverdueCount > 0 ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400' : 'bg-muted text-muted-foreground', onClick: () => navigate('/contas-a-pagar') },
     { title: 'Estoque Baixo', value: kpis.lowStock.toString(), sub: 'abaixo do mínimo', icon: Package, accent: kpis.lowStock > 0 ? 'from-amber-500/20 to-amber-400/5' : 'from-muted to-muted', iconBg: kpis.lowStock > 0 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-muted text-muted-foreground', onClick: kpis.lowStock > 0 ? () => navigate('/estoque') : undefined },
+    { title: 'Notas a Declarar', value: kpis.fiscalPending.toString(), sub: kpis.fiscalOverdue > 0 ? `${kpis.fiscalOverdue} atrasada(s) · ${fmt(kpis.fiscalPendingAmount)}` : (kpis.fiscalPending > 0 ? fmt(kpis.fiscalPendingAmount) : 'nada pendente'), icon: FileText, accent: kpis.fiscalOverdue > 0 ? 'from-rose-500/20 to-rose-400/5' : (kpis.fiscalPending > 0 ? 'from-amber-500/20 to-amber-400/5' : 'from-muted to-muted'), iconBg: kpis.fiscalOverdue > 0 ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400' : (kpis.fiscalPending > 0 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-muted text-muted-foreground'), onClick: () => navigate('/fiscal') },
   ];
 
   return (

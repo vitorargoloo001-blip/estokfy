@@ -31,6 +31,7 @@ const IdleProducts = lazy(() => import("./pages/IdleProducts"));
 const Customers = lazy(() => import("./pages/Customers"));
 const Deliveries = lazy(() => import("./pages/Deliveries"));
 const Returns = lazy(() => import("./pages/Returns"));
+const Fiscal = lazy(() => import("./pages/Fiscal"));
 const Finance = lazy(() => import("./pages/Finance"));
 const Reports = lazy(() => import("./pages/Reports"));
 const PurchasesReport = lazy(() => import("./pages/PurchasesReport"));
@@ -146,6 +147,7 @@ function ProtectedRoutes() {
             <Route path="fidelidade" element={<RequireRoleRoute><Loyalty /></RequireRoleRoute>} />
             <Route path="entregas" element={<RequireRoleRoute><Deliveries /></RequireRoleRoute>} />
             <Route path="trocas" element={<RequireRoleRoute><Returns /></RequireRoleRoute>} />
+            <Route path="fiscal" element={<RequireRoleRoute><Fiscal /></RequireRoleRoute>} />
             <Route path="creditos" element={<RequireRoleRoute><CustomerCredits /></RequireRoleRoute>} />
             <Route path="financeiro" element={<RequireRoleRoute><Finance /></RequireRoleRoute>} />
             <Route path="relatorios" element={<RequireRoleRoute><Reports /></RequireRoleRoute>} />
