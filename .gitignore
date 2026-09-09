@@ -21,6 +21,9 @@ supabase/.temp/
 Extrato_*.pdf
 Supabase Snippet*.csv
 
+# Claude Code personal settings (permission overrides, not shared with team)
+.claude/settings.local.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
