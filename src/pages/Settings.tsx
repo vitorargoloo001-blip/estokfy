@@ -22,7 +22,7 @@ import {
   BarChart3, Bell, Bot, Shield, Plug, Database, Save, Loader2, Search,
   Plus, UserCog, Eye, RefreshCw, AlertTriangle, Download, Upload, BookOpen,
   Zap, Copy, Check, EyeOff, Globe, Activity, Code, Wifi, WifiOff,
-  CheckCircle2, XCircle, Clock, Send, Printer,
+  CheckCircle2, XCircle, Clock, Send, Printer, FileText,
 } from 'lucide-react';
 import PrintingSettings from '@/components/settings/PrintingSettings';
 import { cn } from '@/lib/utils';
@@ -38,6 +38,7 @@ const TABS = [
   { id: 'inventory', label: 'Produtos e Estoque', icon: Package },
   { id: 'sales', label: 'Vendas', icon: ShoppingCart },
   { id: 'finance', label: 'Financeiro', icon: DollarSign },
+  { id: 'fiscal', label: 'Fiscal', icon: FileText },
   { id: 'shipping', label: 'Entregas', icon: Truck },
   { id: 'returns', label: 'Trocas e Devoluções', icon: RotateCcw },
   { id: 'dashboard', label: 'Relatórios e Dashboard', icon: BarChart3 },
@@ -516,6 +517,18 @@ const salesConfig = {
       { key: 'receipt_text', label: 'Texto padrão do comprovante', type: 'input' as const, placeholder: 'Obrigado pela preferência!' },
       { key: 'edit_timeout', label: 'Tempo máximo para edição (minutos)', type: 'input' as const, placeholder: '60' },
     ]},
+  ],
+};
+
+const fiscalConfig = {
+  category: 'fiscal', title: 'Fiscal',
+  description: 'Controle de notas fiscais para declaração. O Estokfy organiza e lembra — não emite nem declara.',
+  sections: [
+    { title: 'Alerta de nota pendente',
+      desc: 'Depois de quantos dias uma nota ainda pendente passa a ser cobrada no Dashboard e no módulo Fiscal. O prazo é da sua empresa: o Estokfy não presume prazo legal, que depende do regime tributário e da orientação do seu contador. Vazio ou inválido volta ao padrão de 15 dias.',
+      items: [
+        { key: 'alert_days', label: 'Dias para alerta de nota pendente', type: 'input' as const, placeholder: '15' },
+      ]},
   ],
 };
 
@@ -1217,6 +1230,7 @@ export default function SettingsPage() {
       case 'inventory': return <SettingsTabGeneric {...inventoryConfig} />;
       case 'sales': return <SettingsTabGeneric {...salesConfig} />;
       case 'finance': return <SettingsTabGeneric {...financeConfig} />;
+      case 'fiscal': return <SettingsTabGeneric {...fiscalConfig} />;
       case 'shipping': return <SettingsTabGeneric {...shippingConfig} />;
       case 'returns': return <SettingsTabGeneric {...returnsConfig} />;
       case 'dashboard': return <SettingsTabGeneric {...dashboardConfig} />;

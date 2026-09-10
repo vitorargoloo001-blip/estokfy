@@ -1,28 +1,12 @@
 import { supabase } from '@/integrations/supabase/client';
 
-// O client é gerado a partir do schema (src/integrations/supabase/types.ts).
-// Enquanto a migration 20260909000001_fiscal_documents.sql não for aplicada
-// e os tipos regenerados (`supabase gen types typescript --linked`), a tabela
-// e as RPCs fiscais ainda não existem no tipo Database. O cast fica isolado
-// AQUI, num único ponto, em vez de espalhar `any` pelas telas — depois de
-// regenerar os tipos, basta remover esta linha e os erros que aparecerem
-// apontam exatamente o que precisa ser ajustado.
-interface PgError { message: string }
-
-interface QueryBuilder extends PromiseLike<{ data: unknown[] | null; error: PgError | null }> {
-  select: (columns: string) => QueryBuilder;
-  eq: (column: string, value: unknown) => QueryBuilder;
-  or: (filter: string) => QueryBuilder;
-  order: (column: string, options?: { ascending?: boolean }) => QueryBuilder;
-  limit: (n: number) => QueryBuilder;
-}
-
-const db = supabase as unknown as {
-  from: (table: string) => QueryBuilder;
-  rpc: (fn: string, args?: Record<string, unknown>) => PromiseLike<{ data: unknown; error: PgError | null }>;
-};
-
 export const FISCAL_BUCKET = 'fiscal-documents';
+
+// Fonte única do padrão no frontend. O valor real vem sempre de
+// get_fiscal_summary, que lê store_settings (category 'fiscal',
+// chave 'alert_days') e aplica o mesmo padrão no servidor — este
+// número só existe para o caso de a RPC não devolver nada.
+export const FISCAL_ALERT_DAYS_DEFAULT = 15;
 
 export type FiscalStatus = 'pending' | 'sent_to_accountant' | 'declared' | 'cancelled';
 export type FiscalDocumentType = 'nfe' | 'nfce' | 'nfse' | 'entrada' | 'saida' | 'outro';
@@ -97,7 +81,7 @@ export interface FiscalFilters {
 }
 
 export async function listFiscalDocuments(f: FiscalFilters): Promise<FiscalDocumentRow[]> {
-  let q = db
+  let q = supabase
     .from('fiscal_documents')
     .select('*')
     .eq('store_id', f.storeId)
@@ -124,13 +108,13 @@ export async function getFiscalSummary(
   year?: number | null,
   month?: number | null,
 ): Promise<FiscalSummary | null> {
-  const { data, error } = await db.rpc('get_fiscal_summary', {
+  const { data, error } = await supabase.rpc('get_fiscal_summary', {
     p_store_id: storeId,
     p_year: year ?? null,
     p_month: month ?? null,
   });
   if (error) throw error;
-  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined | null;
+  const row = Array.isArray(data) ? data[0] : data;
   if (!row) return null;
   return {
     pending_count: Number(row.pending_count) || 0,
@@ -140,12 +124,12 @@ export async function getFiscalSummary(
     period_count: Number(row.period_count) || 0,
     pending_amount: Number(row.pending_amount) || 0,
     overdue_count: Number(row.overdue_count) || 0,
-    alert_days: Number(row.alert_days) || 15,
+    alert_days: Number(row.alert_days) || FISCAL_ALERT_DAYS_DEFAULT,
   };
 }
 
 export async function createFiscalDocument(storeId: string, input: FiscalDocumentInput): Promise<string> {
-  const { data, error } = await db.rpc('create_fiscal_document', {
+  const { data, error } = await supabase.rpc('create_fiscal_document', {
     p_store_id: storeId,
     p_document_type: input.document_type,
     p_direction: input.direction,
@@ -174,7 +158,7 @@ export async function updateFiscalDocument(
   input: FiscalDocumentInput,
   reason?: string | null,
 ): Promise<void> {
-  const { error } = await db.rpc('update_fiscal_document', {
+  const { error } = await supabase.rpc('update_fiscal_document', {
     p_id: id,
     p_document_type: input.document_type,
     p_direction: input.direction,
@@ -203,7 +187,7 @@ export async function setFiscalDocumentStatus(
   status: FiscalStatus,
   notes?: string | null,
 ): Promise<void> {
-  const { error } = await db.rpc('set_fiscal_document_status', {
+  const { error } = await supabase.rpc('set_fiscal_document_status', {
     p_id: id,
     p_status: status,
     p_notes: notes ?? null,

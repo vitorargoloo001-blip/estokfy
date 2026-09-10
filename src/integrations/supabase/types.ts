@@ -493,6 +493,7 @@ export type Database = {
           account_number: string
           account_type: string
           agency: string | null
+          balance: number | null
           bank_code: string | null
           bank_name: string
           created_at: string
@@ -527,6 +528,7 @@ export type Database = {
           account_number: string
           account_type: string
           agency?: string | null
+          balance?: number | null
           bank_code?: string | null
           bank_name: string
           created_at?: string
@@ -561,6 +563,7 @@ export type Database = {
           account_number?: string
           account_type?: string
           agency?: string | null
+          balance?: number | null
           bank_code?: string | null
           bank_name?: string
           created_at?: string
@@ -2141,6 +2144,159 @@ export type Database = {
           },
         ]
       }
+      fiscal_documents: {
+        Row: {
+          access_key: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          competence_month: number
+          competence_year: number
+          counterpart_doc: string | null
+          counterpart_name: string | null
+          created_at: string
+          created_by: string | null
+          customer_id: string | null
+          declared_at: string | null
+          declared_by: string | null
+          direction: string
+          document_type: string
+          fiscal_status: string
+          id: string
+          invoice_number: string
+          issue_date: string
+          notes: string | null
+          pdf_path: string | null
+          sale_id: string | null
+          sent_to_accountant_at: string | null
+          sent_to_accountant_by: string | null
+          series: string | null
+          store_id: string
+          supplier_id: string | null
+          total_amount: number
+          updated_at: string
+          xml_path: string | null
+        }
+        Insert: {
+          access_key?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          competence_month: number
+          competence_year: number
+          counterpart_doc?: string | null
+          counterpart_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string | null
+          declared_at?: string | null
+          declared_by?: string | null
+          direction: string
+          document_type: string
+          fiscal_status?: string
+          id?: string
+          invoice_number: string
+          issue_date: string
+          notes?: string | null
+          pdf_path?: string | null
+          sale_id?: string | null
+          sent_to_accountant_at?: string | null
+          sent_to_accountant_by?: string | null
+          series?: string | null
+          store_id: string
+          supplier_id?: string | null
+          total_amount?: number
+          updated_at?: string
+          xml_path?: string | null
+        }
+        Update: {
+          access_key?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          competence_month?: number
+          competence_year?: number
+          counterpart_doc?: string | null
+          counterpart_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          customer_id?: string | null
+          declared_at?: string | null
+          declared_by?: string | null
+          direction?: string
+          document_type?: string
+          fiscal_status?: string
+          id?: string
+          invoice_number?: string
+          issue_date?: string
+          notes?: string | null
+          pdf_path?: string | null
+          sale_id?: string | null
+          sent_to_accountant_at?: string | null
+          sent_to_accountant_by?: string | null
+          series?: string | null
+          store_id?: string
+          supplier_id?: string | null
+          total_amount?: number
+          updated_at?: string
+          xml_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_documents_cancelled_by_fkey"
+            columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_declared_by_fkey"
+            columns: ["declared_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_sent_to_accountant_by_fkey"
+            columns: ["sent_to_accountant_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       idempotency_keys: {
         Row: {
           action: string
@@ -2758,6 +2914,65 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_allocations: {
+        Row: {
+          amount: number
+          created_at: string
+          id: string
+          payment_id: string
+          sale_id: string
+          sale_item_id: string
+          store_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          id?: string
+          payment_id: string
+          sale_id: string
+          sale_item_id: string
+          store_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: string
+          payment_id?: string
+          sale_id?: string
+          sale_item_id?: string
+          store_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_allocations_payment_id_fkey"
+            columns: ["payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_sale_item_id_fkey"
+            columns: ["sale_item_id"]
+            isOneToOne: false
+            referencedRelation: "sale_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_allocations_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_verifications: {
         Row: {
           ai_confidence: number | null
@@ -2841,6 +3056,7 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          bank_transaction_id: string | null
           created_by: string | null
           external_tx_id: string | null
           id: string
@@ -2856,6 +3072,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          bank_transaction_id?: string | null
           created_by?: string | null
           external_tx_id?: string | null
           id?: string
@@ -2871,6 +3088,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          bank_transaction_id?: string | null
           created_by?: string | null
           external_tx_id?: string | null
           id?: string
@@ -2885,6 +3103,13 @@ export type Database = {
           store_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "payments_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "payments_return_id_fkey"
             columns: ["return_id"]
@@ -3075,6 +3300,7 @@ export type Database = {
           event_type: string
           id: string
           payload: Json
+          pluggy_event_id: string | null
           pluggy_item_id: string | null
           processed: boolean
           processed_at: string | null
@@ -3086,6 +3312,7 @@ export type Database = {
           event_type: string
           id?: string
           payload?: Json
+          pluggy_event_id?: string | null
           pluggy_item_id?: string | null
           processed?: boolean
           processed_at?: string | null
@@ -3097,6 +3324,7 @@ export type Database = {
           event_type?: string
           id?: string
           payload?: Json
+          pluggy_event_id?: string | null
           pluggy_item_id?: string | null
           processed?: boolean
           processed_at?: string | null
@@ -3254,66 +3482,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "profiles_store_id_fkey"
-            columns: ["store_id"]
-            isOneToOne: false
-            referencedRelation: "stores"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      provider_webhooks: {
-        Row: {
-          bank_connection_id: string | null
-          created_at: string | null
-          event_type: string
-          id: string
-          payload: Json
-          processed: boolean | null
-          processed_at: string | null
-          processing_error: string | null
-          provider: string
-          store_id: string
-          webhook_id: string | null
-          webhook_signature: string | null
-        }
-        Insert: {
-          bank_connection_id?: string | null
-          created_at?: string | null
-          event_type: string
-          id?: string
-          payload: Json
-          processed?: boolean | null
-          processed_at?: string | null
-          processing_error?: string | null
-          provider: string
-          store_id: string
-          webhook_id?: string | null
-          webhook_signature?: string | null
-        }
-        Update: {
-          bank_connection_id?: string | null
-          created_at?: string | null
-          event_type?: string
-          id?: string
-          payload?: Json
-          processed?: boolean | null
-          processed_at?: string | null
-          processing_error?: string | null
-          provider?: string
-          store_id?: string
-          webhook_id?: string | null
-          webhook_signature?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "provider_webhooks_bank_connection_id_fkey"
-            columns: ["bank_connection_id"]
-            isOneToOne: false
-            referencedRelation: "bank_connections"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "provider_webhooks_store_id_fkey"
             columns: ["store_id"]
             isOneToOne: false
             referencedRelation: "stores"
@@ -3587,6 +3755,7 @@ export type Database = {
           id: string
           notes: string | null
           reason: string
+          refund_mode: string | null
           sale_id: string | null
           status: string
           store_id: string
@@ -3600,6 +3769,7 @@ export type Database = {
           id?: string
           notes?: string | null
           reason: string
+          refund_mode?: string | null
           sale_id?: string | null
           status: string
           store_id: string
@@ -3613,6 +3783,7 @@ export type Database = {
           id?: string
           notes?: string | null
           reason?: string
+          refund_mode?: string | null
           sale_id?: string | null
           status?: string
           store_id?: string
@@ -4840,6 +5011,24 @@ export type Database = {
     }
     Functions: {
       _ai_query_question_text: { Args: { p_key: string }; Returns: string }
+      _allocate_payment_fifo_within_sale: {
+        Args: { p_amount: number; p_payment_id: string; p_sale_id: string }
+        Returns: undefined
+      }
+      _assert_bank_connection_access: {
+        Args: { p_connection_id: string }
+        Returns: boolean
+      }
+      _assert_fiscal_manage: { Args: { p_store_id: string }; Returns: boolean }
+      _assert_platform_admin: { Args: never; Returns: boolean }
+      _assert_store_membership: {
+        Args: { p_store_id: string }
+        Returns: boolean
+      }
+      _assert_store_membership_or_admin: {
+        Args: { p_store_id: string }
+        Returns: boolean
+      }
       _connect_run_matching_core: {
         Args: { p_store_id: string }
         Returns: Json
@@ -5133,6 +5322,29 @@ export type Database = {
         }
         Returns: string
       }
+      create_fiscal_document: {
+        Args: {
+          p_access_key?: string
+          p_competence_month: number
+          p_competence_year: number
+          p_counterpart_doc?: string
+          p_counterpart_name?: string
+          p_customer_id?: string
+          p_direction: string
+          p_document_type: string
+          p_invoice_number: string
+          p_issue_date: string
+          p_notes?: string
+          p_pdf_path?: string
+          p_sale_id?: string
+          p_series?: string
+          p_store_id: string
+          p_supplier_id?: string
+          p_total_amount: number
+          p_xml_path?: string
+        }
+        Returns: string
+      }
       create_itau_direct_connection: {
         Args: {
           p_account_number: string
@@ -5183,44 +5395,20 @@ export type Database = {
         }
         Returns: string
       }
-      create_sale_atomic:
-        | {
-            Args: {
-              p_customer_id: string
-              p_delivery: Json
-              p_discount?: number
-              p_items: Json
-              p_payments: Json
-              p_store_id: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
-              p_customer_id: string
-              p_delivery: Json
-              p_discount?: number
-              p_due_date?: string
-              p_items: Json
-              p_payments: Json
-              p_store_id: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
-              p_customer_id: string
-              p_delivery: Json
-              p_discount?: number
-              p_due_date?: string
-              p_items: Json
-              p_notes?: string
-              p_payments: Json
-              p_sale_date?: string
-              p_store_id: string
-            }
-            Returns: string
-          }
+      create_sale_atomic: {
+        Args: {
+          p_customer_id: string
+          p_delivery: Json
+          p_discount?: number
+          p_due_date?: string
+          p_items: Json
+          p_notes?: string
+          p_payments: Json
+          p_sale_date?: string
+          p_store_id: string
+        }
+        Returns: string
+      }
       create_service_order: { Args: { p_payload: Json }; Returns: string }
       current_profile: {
         Args: never
@@ -5470,40 +5658,13 @@ export type Database = {
         }[]
       }
       get_automations_dashboard: { Args: { p_store_id: string }; Returns: Json }
-      get_bank_connection_token: {
-        Args: { p_bank_connection_id: string; p_store_id: string }
-        Returns: {
-          access_token: string
-          needs_refresh: boolean
-          provider: string
-          provider_connection_id: string
-          token_expires_at: string
-        }[]
-      }
-      get_bank_connection_with_provider: {
-        Args: { p_store_id: string }
-        Returns: {
-          account_type: string
-          bank_name: string
-          created_at: string
-          id: string
-          last_sync_at: string
-          last_sync_error: string
-          provider: string
-          provider_connection_id: string
-          status: string
-          store_id: string
-          sync_status: string
-          token_expires_at: string
-          webhook_subscribed: boolean
-        }[]
-      }
       get_bank_connections_with_pluggy: {
         Args: { p_store_id: string }
         Returns: {
           account_number: string
           account_type: string
           agency: string
+          balance: number
           bank_code: string
           bank_name: string
           id: string
@@ -5943,6 +6104,19 @@ export type Database = {
         }
         Returns: Json
       }
+      get_fiscal_summary: {
+        Args: { p_month?: number; p_store_id: string; p_year?: number }
+        Returns: {
+          alert_days: number
+          cancelled_count: number
+          declared_count: number
+          overdue_count: number
+          pending_amount: number
+          pending_count: number
+          period_count: number
+          sent_count: number
+        }[]
+      }
       get_itau_webhook_secret: {
         Args: { p_bank_connection_id: string }
         Returns: string
@@ -6135,34 +6309,19 @@ export type Database = {
           total_out: number
         }[]
       }
-      get_reconciliation_by_method:
-        | {
-            Args: { p_period_days?: number; p_store_id: string }
-            Returns: {
-              method: string
-              reconciled_amount: number
-              reconciled_count: number
-              total_amount: number
-              total_count: number
-            }[]
-          }
-        | {
-            Args: {
-              p_end_date?: string
-              p_start_date?: string
-              p_store_id: string
-            }
-            Returns: {
-              divergent_count: number
-              method: string
-              pending_count: number
-              reconciled_amount: number
-              reconciled_count: number
-              reconciliation_rate: number
-              total_amount: number
-              total_count: number
-            }[]
-          }
+      get_reconciliation_by_method: {
+        Args: { p_end_date?: string; p_start_date?: string; p_store_id: string }
+        Returns: {
+          divergent_count: number
+          method: string
+          pending_count: number
+          reconciled_amount: number
+          reconciled_count: number
+          reconciliation_rate: number
+          total_amount: number
+          total_count: number
+        }[]
+      }
       get_reconciliation_history: {
         Args: {
           p_end_date?: string
@@ -6500,25 +6659,6 @@ export type Database = {
           store_plan: string
         }[]
       }
-      list_webhook_events: {
-        Args: {
-          p_bank_connection_id?: string
-          p_event_type?: string
-          p_limit?: number
-          p_offset?: number
-          p_processed?: boolean
-          p_store_id: string
-        }
-        Returns: {
-          created_at: string
-          event_type: string
-          id: string
-          payload: Json
-          processed: boolean
-          processed_at: string
-          processing_error: string
-        }[]
-      }
       log_connect_audit: {
         Args: {
           p_action: string
@@ -6573,14 +6713,6 @@ export type Database = {
       mark_pluggy_item_synced: {
         Args: { p_pluggy_item_id: string; p_synced_at?: string }
         Returns: undefined
-      }
-      mark_webhook_processed: {
-        Args: {
-          p_error_message?: string
-          p_success: boolean
-          p_webhook_id: string
-        }
-        Returns: boolean
       }
       obter_relatorio_operacional_v2: {
         Args: {
@@ -6719,33 +6851,19 @@ export type Database = {
           success: boolean
         }[]
       }
-      resolve_product_ids_by_filter:
-        | {
-            Args: {
-              p_brand?: string
-              p_category_id?: string
-              p_filter_key?: string
-              p_limit?: number
-              p_offset?: number
-              p_search?: string
-            }
-            Returns: {
-              id: string
-            }[]
-          }
-        | {
-            Args: {
-              p_brand?: string
-              p_category_id?: string
-              p_filter_key?: string
-              p_search?: string
-              p_status?: string
-              p_store_id?: string
-            }
-            Returns: {
-              id: string
-            }[]
-          }
+      resolve_product_ids_by_filter: {
+        Args: {
+          p_brand?: string
+          p_category_id?: string
+          p_filter_key?: string
+          p_search?: string
+          p_status?: string
+          p_store_id?: string
+        }
+        Returns: {
+          id: string
+        }[]
+      }
       resolve_product_ids_by_filter_page: {
         Args: {
           p_after_id?: string
@@ -6814,6 +6932,10 @@ export type Database = {
         Args: { p_enabled: boolean; p_store_id: string }
         Returns: undefined
       }
+      set_fiscal_document_status: {
+        Args: { p_id: string; p_notes?: string; p_status: string }
+        Returns: undefined
+      }
       set_os_payment_terms_flag: {
         Args: { p_enabled: boolean; p_store_id: string }
         Returns: undefined
@@ -6831,20 +6953,25 @@ export type Database = {
         }
         Returns: Json
       }
-      settle_sale_payment:
-        | {
-            Args: { p_paid_at?: string; p_payments: Json; p_sale_id: string }
-            Returns: Json
-          }
-        | {
-            Args: {
-              p_note?: string
-              p_paid_at?: string
-              p_payments: Json
-              p_sale_id: string
-            }
-            Returns: Json
-          }
+      settle_sale_items_payment: {
+        Args: {
+          p_item_allocations: Json
+          p_method: string
+          p_note?: string
+          p_paid_at?: string
+          p_sale_id: string
+        }
+        Returns: Json
+      }
+      settle_sale_payment: {
+        Args: {
+          p_note?: string
+          p_paid_at?: string
+          p_payments: Json
+          p_sale_id: string
+        }
+        Returns: Json
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       so_add_equipment: {
@@ -6927,18 +7054,6 @@ export type Database = {
         }
         Returns: string
       }
-      store_provider_webhook: {
-        Args: {
-          p_bank_connection_id: string
-          p_event_type: string
-          p_payload: Json
-          p_provider: string
-          p_signature: string
-          p_store_id: string
-          p_webhook_id: string
-        }
-        Returns: string
-      }
       super_admin_ai_overview: { Args: never; Returns: Json }
       super_admin_set_business_type: {
         Args: { p_business_type: string; p_store_id: string }
@@ -6954,31 +7069,6 @@ export type Database = {
           message: string
           new_status: string
           success: boolean
-        }[]
-      }
-      sync_bank_accounts_from_provider: {
-        Args: {
-          p_accounts: Json
-          p_bank_connection_id: string
-          p_store_id: string
-        }
-        Returns: {
-          accounts_synced: number
-          message: string
-          success: boolean
-        }[]
-      }
-      sync_bank_transactions_from_provider: {
-        Args: {
-          p_bank_account_id: string
-          p_bank_connection_id: string
-          p_store_id: string
-          p_transactions: Json
-        }
-        Returns: {
-          message: string
-          success: boolean
-          transactions_synced: number
         }[]
       }
       toggle_connect_automation: {
@@ -7005,14 +7095,6 @@ export type Database = {
           message: string
           success: boolean
         }[]
-      }
-      update_bank_connection_sync: {
-        Args: {
-          p_bank_connection_id: string
-          p_error_message?: string
-          p_sync_status: string
-        }
-        Returns: boolean
       }
       update_bank_connection_sync_status: {
         Args: {
@@ -7061,19 +7143,29 @@ export type Database = {
         Args: { p_new_role: string; p_profile_id: string }
         Returns: undefined
       }
-      update_or_insert_bank_connection: {
+      update_fiscal_document: {
         Args: {
-          p_access_token_encrypted: string
-          p_account_type: string
-          p_bank_name: string
-          p_provider: string
-          p_provider_connection_id: string
-          p_status: string
-          p_store_id: string
-          p_sync_status: string
-          p_token_expires_at: string
+          p_access_key?: string
+          p_competence_month: number
+          p_competence_year: number
+          p_counterpart_doc?: string
+          p_counterpart_name?: string
+          p_customer_id?: string
+          p_direction: string
+          p_document_type: string
+          p_id: string
+          p_invoice_number: string
+          p_issue_date: string
+          p_notes?: string
+          p_pdf_path?: string
+          p_reason?: string
+          p_sale_id?: string
+          p_series?: string
+          p_supplier_id?: string
+          p_total_amount: number
+          p_xml_path?: string
         }
-        Returns: string
+        Returns: undefined
       }
       update_pluggy_item_status: {
         Args: {
@@ -7170,12 +7262,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -7199,11 +7291,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -7224,11 +7316,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -7249,11 +7341,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -7266,11 +7358,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

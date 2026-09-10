@@ -1,7 +1,9 @@
 # Módulo Fiscal — controle de notas fiscais para declaração
 
-**Status:** implementado, migration **ainda não aplicada** em produção
-(`supabase/migrations/20260909000001_fiscal_documents.sql`).
+**Status:** V1 em produção desde 2026-09-09. Migration base aplicada
+(`20260909000001_fiscal_documents.sql`) e validada ponta a ponta no navegador:
+lançamento, importação de XML, anexo de PDF, envio ao contador, declaração,
+cancelamento e exportação PDF/CSV.
 
 ## O que o módulo é — e o que não é
 
@@ -44,6 +46,14 @@ Tabela única `fiscal_documents` (multi-tenant por `store_id`).
 **Sem hard delete.** Erro se resolve cancelando (`fiscal_status = 'cancelled'`,
 `cancelled_at/by` preenchidos) ou corrigindo — toda alteração grava
 `before_json`/`after_json` em `audit_logs`.
+
+**Cancelar uma nota NÃO apaga seus anexos.** Regra oficial, para preservação de
+histórico e auditoria: o XML e o PDF continuam no bucket e continuam vinculados
+ao documento cancelado (`xml_path`/`pdf_path` são mantidos), e quem tem
+permissão fiscal segue conseguindo abri-los. `set_fiscal_document_status` só
+carimba `cancelled_at`/`cancelled_by` — não toca nos caminhos nem remove
+objeto de storage. Nunca implementar limpeza automática de anexo no
+cancelamento; remoção de arquivo é sempre ação humana e deliberada.
 
 **Anti-duplicidade** por dois índices únicos parciais (notas canceladas saem do
 índice, para permitir relançar): `(store_id, access_key)` e
@@ -90,8 +100,32 @@ campos que casarem são aproveitados e o resto fica em branco.
 ## Configuração por loja
 
 Prazo de alerta em `store_settings`, `category = 'fiscal'`,
-`settings->>'alert_days'` (padrão 15 quando ausente). É o que alimenta o aviso
-"N notas pendentes há mais de X dias".
+`settings->>'alert_days'`. Editável em **Configurações → Fiscal → Dias para
+alerta de nota pendente** (owner/admin, pela policy de `store_settings`). É o
+que alimenta o aviso "N notas pendentes há mais de X dias".
+
+Fonte única: quem decide o valor efetivo é `get_fiscal_summary`, que lê
+`store_settings` e devolve `alert_days` junto dos KPIs — a tela Fiscal e o card
+do Dashboard apenas exibem o que veio da RPC, sem recalcular prazo. No frontend
+o padrão vive só em `FISCAL_ALERT_DAYS_DEFAULT` (`src/lib/fiscalApi.ts`), usado
+apenas se a RPC não devolver nada.
+
+A tela grava o campo como **texto livre**, então a RPC valida: só aceita inteiro
+entre 1 e 3650; texto, vazio, zero, negativo ou decimal caem no padrão de 15
+dias em vez de derrubar a consulta. Sem essa proteção um `"quinze"` digitado nas
+configurações quebraria de uma vez o card do Dashboard e a tela Fiscal.
+
+## Por que não existe notificação fiscal em `notifications`
+
+A policy de SELECT de `public.notifications` é apenas
+`store_id = get_my_store_id()`, **sem recorte por papel** — qualquer papel da
+loja, vendedor incluído, lê todas as notificações. Criar ali um alerta do tipo
+"N notas pendentes de declaração" exporia o quadro fiscal da empresa ao
+vendedor, quebrando a regra central do módulo. Por isso o alerta fiscal vive no
+Dashboard (card "Notas a Declarar" + toast), que já é restrito: o Dashboard
+financeiro nem renderiza para vendedor, e `get_fiscal_summary` recusa o papel
+`sales`. Só dá para mudar isso depois de dar recorte por papel a
+`notifications`.
 
 ## Arquivos
 
@@ -102,14 +136,11 @@ Prazo de alerta em `store_settings`, `category = 'fiscal'`,
 - `src/components/FiscalDocumentFormDialog.tsx` — lançamento/edição + anexos
 - Ligações: `src/App.tsx` (rota `/fiscal`), `src/lib/roleAccess.ts`, `src/components/AppSidebar.tsx`, `src/pages/Dashboard.tsx` (card "Notas a Declarar")
 
-## Pendências antes de considerar o módulo em produção
+## Pendências
 
-1. Aplicar a migration (`supabase db push`) — **requer autorização explícita**.
-2. Regenerar os tipos: `supabase gen types typescript --linked > src/integrations/supabase/types.ts`,
-   depois remover o cast do topo de `src/lib/fiscalApi.ts` e corrigir o que o
-   compilador apontar.
-3. Smoke test de UI (só possível depois de aplicar): lançar nota sem venda,
-   lançar vinculada a venda, anexar XML e conferir o preenchimento, percorrer os
-   quatro status, exportar PDF/CSV, e conferir o card no Dashboard.
-4. Tela de configuração do `alert_days` — hoje o valor existe e é respeitado,
-   mas ainda não há UI para editá-lo (cai no padrão de 15 dias).
+1. **Visão do vendedor não foi testada no navegador.** O backend está provado
+   (vê apenas notas das próprias vendas; recebe `sem_permissao_fiscal` ao tentar
+   declarar, enviar, cancelar ou editar), mas falta exercitar a tela com um
+   login de papel `sales`. Não relaxar o backend para viabilizar esse teste.
+2. Nota de teste nº 39416497 permanece em produção como cancelada, com os dois
+   anexos — coerente com a regra de não apagar histórico.
