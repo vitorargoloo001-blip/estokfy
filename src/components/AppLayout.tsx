@@ -5,6 +5,7 @@ import MobileNav from './MobileNav';
 import MobileFAB from './MobileFAB';
 import TopBar from './TopBar';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useNewVersionCheck } from '@/hooks/useNewVersionCheck';
 import PageTip from './PageTip';
 
 // Lazy: chat IA não precisa estar no bundle inicial
@@ -12,6 +13,7 @@ const AISupportChat = lazy(() => import('./AISupportChat'));
 
 export default function AppLayout() {
   useKeyboardShortcuts();
+  useNewVersionCheck();
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-background">
