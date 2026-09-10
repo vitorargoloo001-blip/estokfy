@@ -301,7 +301,22 @@ export default function NewSale() {
     const cleanPayments = payments.filter(p => p.amount > 0);
     if (cleanPayments.length === 0) { toast.error('Informe pelo menos um pagamento'); return; }
     if (Math.abs(paymentsSum - total) > 0.01) {
-      toast.error(`Soma dos pagamentos (${paymentsSum.toFixed(2)}) deve ser igual ao total (${total.toFixed(2)})`); return;
+      // Mensagem detalhada: a versao antiga so dizia "X deve ser igual a Y",
+      // o que nao permitia ao vendedor descobrir de onde vinha a diferenca.
+      // Frete e desconto entram no total e sao a origem mais comum do desvio;
+      // o outro caso classico e digitar o valor que o cliente entregou (com
+      // troco) em vez do valor da venda.
+      const partes = [`Produtos ${fmt(subtotal)}`];
+      if (discount > 0) partes.push(`desconto -${fmt(discount)}`);
+      if (shippingFee > 0) partes.push(`frete +${fmt(shippingFee)}`);
+      const diferenca = paymentsSum - total;
+      toast.error(
+        `Os pagamentos somam ${fmt(paymentsSum)}, mas o total da venda é ${fmt(total)} ` +
+        `(${partes.join(', ')}). ${diferenca > 0 ? `Sobram ${fmt(diferenca)}` : `Faltam ${fmt(-diferenca)}`}. ` +
+        `Se o cliente entregou a mais e você vai dar troco, informe aqui o valor da venda, não o valor entregue.`,
+        { duration: 12000 },
+      );
+      return;
     }
 
     const resolvedCustomerId = (!customerId || customerId === 'none') ? null : customerId;
@@ -412,6 +427,27 @@ export default function NewSale() {
       idempotencyRef.current = null;
       const message = err?.message || 'Erro inesperado.';
       if (message.includes('Sessão expirada')) navigate('/login');
+
+      // Caso especial: a tela ja conferiu que pagamentos == total, entao se o
+      // servidor recusa por divergencia e porque os dois calcularam o total de
+      // formas diferentes. Na pratica isso acontece quando a aba esta aberta ha
+      // dias rodando uma versao antiga do app (foi o que segurou uma vendedora
+      // por 4 dias em 2026-08, mesmo depois da correcao publicada). Recarregar
+      // resolve, entao a mensagem precisa dizer isso.
+      if (message.includes('não corresponde') || message.includes('pagamentos_nao_batem_com_total')) {
+        console.error('[NewSale] divergência tela x servidor', {
+          subtotal, discount, shippingFee, total, paymentsSum,
+          delivery: payload.delivery, items: payload.items, payments: payload.payments,
+        });
+        toast.error(
+          `O servidor recusou: para ele o total não é ${fmt(total)}. ` +
+          `Isso costuma acontecer quando esta aba está aberta há muito tempo com uma versão antiga do sistema. ` +
+          `Atualize a página (Ctrl+Shift+R) e refaça a venda. Se continuar, avise o suporte.`,
+          { duration: 15000 },
+        );
+        return;
+      }
+
       toast.error(message);
     } finally { setSubmitting(false); }
   };
