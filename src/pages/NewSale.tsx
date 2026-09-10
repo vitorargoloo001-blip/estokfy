@@ -48,6 +48,11 @@ export default function NewSale() {
   const [discount, setDiscount] = useState(0);
   const [deliveryMethod, setDeliveryMethod] = useState('pickup');
   const [shippingFee, setShippingFee] = useState(0);
+  // Quanto o cliente entregou em dinheiro. É só uma calculadora de troco na
+  // tela: NUNCA entra no payload nem vira pagamento. O valor entregue não é
+  // receita — confundir os dois foi a origem das 290 vendas com desvio de
+  // troco reconciliadas em 2026-09.
+  const [cashReceived, setCashReceived] = useState(0);
   const [dueDate, setDueDate] = useState<Date | undefined>(undefined);
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [notes, setNotes] = useState('');
@@ -235,6 +240,8 @@ export default function NewSale() {
   const subtotal = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
   const total = Math.max(0, subtotal - discount + shippingFee);
   const paymentsSum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const cashSum = payments.filter(p => p.method === 'cash').reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const troco = cashReceived - cashSum;
   const pendingSum = payments.filter(p => p.method === 'pending').reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const remaining = Math.max(0, total - paymentsSum);
   const hasPending = pendingSum > 0;
@@ -453,7 +460,7 @@ export default function NewSale() {
   };
 
   const handleNewSale = () => {
-    setItems([]); setCustomerId(''); setDiscount(0); setShippingFee(0);
+    setItems([]); setCustomerId(''); setDiscount(0); setShippingFee(0); setCashReceived(0);
     setPayments([{ method: 'pix', amount: 0 }]); setDeliveryMethod('pickup');
     setDueDate(undefined); setSaleDate(new Date()); setNotes(''); setSuccess(null); idempotencyRef.current = null;
     fetchData();
@@ -685,6 +692,34 @@ export default function NewSale() {
                   <p className="text-xs text-destructive">
                     Valor em crédito excede o disponível ({fmt(customerCredit)}).
                   </p>
+                )}
+
+                {cashSum > 0 && (
+                  <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">Cliente entregou (dinheiro)</Label>
+                      <Input type="number" step="0.01" min="0" value={cashReceived || ''}
+                        onChange={e => setCashReceived(Math.max(0, parseFloat(e.target.value) || 0))}
+                        placeholder={cashSum.toFixed(2)}
+                        className="h-9 w-28 text-right" />
+                    </div>
+                    {cashReceived > 0 && (
+                      troco >= 0 ? (
+                        <div className="flex justify-between text-sm font-semibold">
+                          <span>Troco</span>
+                          <span className={troco > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''}>{fmt(troco)}</span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          Faltam {fmt(-troco)} para cobrir os {fmt(cashSum)} em dinheiro.
+                        </p>
+                      )
+                    )}
+                    <p className="text-[11px] text-muted-foreground">
+                      Só para calcular o troco. A venda continua registrada por {fmt(total)} — o valor
+                      entregue não é receita e não é gravado.
+                    </p>
+                  </div>
                 )}
                 <Button variant="outline" size="sm" className="w-full" onClick={addPaymentLine}>
                   <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar pagamento
