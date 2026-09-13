@@ -246,13 +246,26 @@ export default function NewSale() {
   const remaining = Math.max(0, total - paymentsSum);
   const hasPending = pendingSum > 0;
 
-  // Auto-ajusta pagamento único ao total final (após desconto/frete).
-  // Para múltiplos pagamentos, o usuário ajusta manualmente (ou via botão).
+  // Mantém os pagamentos acompanhando o total quando desconto, frete ou
+  // quantidade mudam. A última linha absorve a diferença — mesma regra do
+  // botão "Ajustar pagamento", para o comportamento ser previsível.
+  //
+  // Antes isso só valia para pagamento único: com a venda dividida em duas
+  // linhas, mexer no frete depois deixava os valores para trás em silêncio e
+  // a venda era recusada no fim, sem nada na tela indicando o porquê. Uma
+  // vendedora ficou dias travada assim, achando que estava tudo certo.
   useEffect(() => {
-    if (payments.length === 1 && Math.abs(payments[0].amount - total) > 0.01) {
-      setPayments([{ ...payments[0], amount: total }]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setPayments(prev => {
+      const soma = prev.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      if (Math.abs(soma - total) <= 0.01) return prev;
+      const ajustado = [...prev];
+      const outros = ajustado.slice(0, -1).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      ajustado[ajustado.length - 1] = {
+        ...ajustado[ajustado.length - 1],
+        amount: Math.max(0, Number((total - outros).toFixed(2))),
+      };
+      return ajustado;
+    });
   }, [total]);
 
   const autoAdjustPayments = () => {
