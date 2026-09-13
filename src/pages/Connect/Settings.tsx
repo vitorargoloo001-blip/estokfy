@@ -45,12 +45,12 @@ export default function Settings() {
 
       if (error && error.code !== "PGRST116") throw error;
 
-      if (data?.settings) {
+      if (data?.settings && typeof data.settings === "object" && !Array.isArray(data.settings)) {
         setSettings({
-          auto_reconciliation_enabled: data.settings.auto_reconciliation_enabled ?? true,
-          min_confidence_auto: data.settings.min_confidence_auto ?? 95,
-          date_window_days: data.settings.date_window_days ?? 35,
-          amount_tolerance: data.settings.amount_tolerance ?? 100,
+          auto_reconciliation_enabled: typeof data.settings.auto_reconciliation_enabled === "boolean" ? data.settings.auto_reconciliation_enabled : true,
+          min_confidence_auto: typeof data.settings.min_confidence_auto === "number" ? data.settings.min_confidence_auto : 95,
+          date_window_days: typeof data.settings.date_window_days === "number" ? data.settings.date_window_days : 35,
+          amount_tolerance: typeof data.settings.amount_tolerance === "number" ? data.settings.amount_tolerance : 100,
         });
       }
     } catch (error) {
@@ -70,11 +70,9 @@ export default function Settings() {
         .upsert({
           store_id: profile.store_id,
           category: "connect",
-          settings: settings,
+          settings: { ...settings },
           updated_at: new Date().toISOString(),
-        })
-        .eq("store_id", profile.store_id)
-        .eq("category", "connect");
+        }, { onConflict: "store_id,category" });
 
       if (error) throw error;
 

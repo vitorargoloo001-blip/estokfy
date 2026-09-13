@@ -1,3 +1,4 @@
+import type { Database } from "@/integrations/supabase/types";
 import React, { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -122,7 +123,7 @@ function PendentesTab() {
     if (!profile?.store_id || !searchTarget) return;
     setSearching(true);
     try {
-      const params: Record<string, unknown> = {
+      const params: Database['public']['Functions']['search_sales_for_match_v2']['Args'] = {
         p_store_id: profile.store_id,
         p_amount: searchTarget.amount,
         p_date: searchTarget.date,
@@ -306,7 +307,7 @@ function PendentesTab() {
                           <div className="space-y-0.5">
                             <p className="font-medium">{fmtBRL(m.transaction_amount)}</p>
                             <p className="text-xs text-muted-foreground">
-                              {fmtDate(m.transaction_date)} · {METHOD_LABELS[m.method] ?? m.method}
+                              {fmtDate(m.transaction_date)} · {METHOD_LABELS[m.payment_method] ?? m.payment_method}
                             </p>
                             <p className="text-xs text-muted-foreground truncate max-w-[200px]">
                               {m.transaction_description || "Sem descrição"}
@@ -400,7 +401,7 @@ function PendentesTab() {
                           <td colSpan={5} className="px-6 pb-3 pt-1">
                             <p className="text-xs text-muted-foreground">
                               <strong>Motivo:</strong>{" "}
-                              {m.match_reason || "—"} ·{" "}
+                              {MATCH_TYPE_LABEL[m.match_type] || m.match_type || "—"} ·{" "}
                               <strong>Banco:</strong> {m.bank_name}
                               {m.date_difference_days != null && (
                                 <> · <strong>Δ dias:</strong> {m.date_difference_days}</>

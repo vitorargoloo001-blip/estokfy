@@ -1,23 +1,9 @@
-﻿import { useEffect, useState } from "react";
+import type { Database } from "@/integrations/supabase/types";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
-export interface BankTransaction {
-  id: string;
-  transaction_date: string;
-  transaction_time: string | null;
-  amount: number;
-  transaction_type: "debit" | "credit";
-  description: string | null;
-  bank_name: string;
-  method: string | null;
-  status: "pending" | "reconciled" | "divergent" | "ignored";
-  origin_account: string | null;
-  destination_account: string | null;
-  category: string | null;
-  reconciled_with: string;
-  created_at: string;
-}
+export type BankTransaction = Database['public']['Functions']['list_bank_transactions']['Returns'][number];
 
 export interface TransactionSummary {
   total_count: number;

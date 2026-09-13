@@ -1,3 +1,4 @@
+import type { Database } from "@/integrations/supabase/types";
 import React, { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -135,7 +136,7 @@ export default function Discrepancies() {
     setLoading(true);
     setError(null);
     try {
-      const params: Record<string, unknown> = {
+      const params: Database['public']['Functions']['get_divergences_detailed']['Args'] = {
         p_store_id: storeId,
         p_limit: 200,
         p_offset: 0,
@@ -286,7 +287,7 @@ export default function Discrepancies() {
     if (!storeId) return;
     setHistoryLoading(true);
     try {
-      const params: Record<string, unknown> = { p_store_id: storeId, p_limit: 200, p_offset: 0 };
+      const params: Database['public']['Functions']['get_divergence_history']['Args'] = { p_store_id: storeId, p_limit: 200, p_offset: 0 };
       if (historyStatus !== "all") params.p_status = historyStatus;
       if (historyDateStart) params.p_start_date = historyDateStart;
       if (historyDateEnd)   params.p_end_date   = historyDateEnd;

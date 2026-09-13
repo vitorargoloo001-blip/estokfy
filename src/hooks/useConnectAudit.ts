@@ -1,20 +1,9 @@
+import type { Database } from "@/integrations/supabase/types";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
-export interface AuditLog {
-  id: string;
-  user_id: string;
-  user_email: string;
-  action: string;
-  action_type: "login" | "sync" | "reconciliation" | "update" | "delete" | "reprocess";
-  entity_type: string;
-  entity_id: string | null;
-  details: Record<string, any> | null;
-  ip_address: string | null;
-  created_at: string;
-  created_at_date: string;
-}
+export type AuditLog = Database['public']['Functions']['list_connect_audit_logs']['Returns'][number];
 
 export interface AuditSummary {
   action_type: string;

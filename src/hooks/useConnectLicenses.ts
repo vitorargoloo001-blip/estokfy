@@ -1,23 +1,8 @@
+import type { Database } from "@/integrations/supabase/types";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-export interface ConnectLicense {
-  id: string;
-  store_id: string;
-  store_name: string;
-  owner_email: string;
-  plan_type: "starter" | "professional" | "enterprise";
-  status: "active" | "suspended" | "cancelled";
-  contracted_at: string;
-  expires_at: string;
-  amount_paid: number;
-  currency: string;
-  suspended_at: string | null;
-  cancelled_at: string | null;
-  auto_renew: boolean;
-  days_until_expiry: number | null;
-  created_at: string;
-}
+export type ConnectLicense = Database['public']['Functions']['list_connect_licenses']['Returns'][number];
 
 export interface ConnectLicenseDetail extends ConnectLicense {
   suspended_by: string | null;
@@ -39,7 +24,7 @@ export interface LicenseStats {
 export function useConnectLicenses() {
   const [licenses, setLicenses] = useState<ConnectLicense[]>([]);
   const [stats, setStats] = useState<LicenseStats | null>(null);
-  const [expiringLicenses, setExpiringLicenses] = useState<ConnectLicense[]>([]);
+  const [expiringLicenses, setExpiringLicenses] = useState<Database['public']['Functions']['get_expiring_licenses']['Returns']>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

@@ -1,3 +1,4 @@
+import type { Json } from "@/integrations/supabase/types";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -246,8 +247,8 @@ export default function ConnectAutomations() {
         supabase.rpc("get_pending_approvals", { p_store_id: storeId }),
         supabase.rpc("get_connect_notifications", { p_store_id: storeId, p_unread_only: false, p_limit: 30 }),
       ]);
-      setAutomations((autoRes.data as Automation[]) ?? []);
-      setDashboard(dashRes.data as Dashboard);
+      setAutomations((autoRes.data as unknown as Automation[]) ?? []);
+      setDashboard(dashRes.data as unknown as Dashboard);
       setPendingApprovals((pendRes.data as AutomationRun[]) ?? []);
       setNotifications((notifRes.data as Notification[]) ?? []);
     } finally {
@@ -381,7 +382,7 @@ export default function ConnectAutomations() {
 
   async function handleSave() {
     if (!storeId) return;
-    let parsedConfig: Record<string, unknown> = {};
+    let parsedConfig: Json = {};
     try { parsedConfig = JSON.parse(form.config || "{}"); }
     catch { toast({ title: "Config JSON inválido", variant: "destructive" }); return; }
 
@@ -392,7 +393,7 @@ export default function ConnectAutomations() {
         p_name: form.name,
         p_description: form.description || null,
         p_config: parsedConfig,
-        p_schedule: form.schedule,
+        p_schedule: { ...form.schedule },
         p_channels: form.channels,
         p_is_active: form.is_active,
       });
@@ -406,7 +407,7 @@ export default function ConnectAutomations() {
         p_name: form.name || meta.label,
         p_description: form.description || meta.description,
         p_config: parsedConfig,
-        p_schedule: form.schedule,
+        p_schedule: { ...form.schedule },
         p_channels: form.channels,
         p_is_active: form.is_active,
       });

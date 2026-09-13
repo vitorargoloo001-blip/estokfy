@@ -73,7 +73,7 @@ export default function DRE() {
     });
     setLoading(false);
     if (error) { toast({ title: "Erro ao carregar DRE", variant: "destructive" }); return; }
-    setComparison(data as DREComparison);
+    setComparison(data as unknown as DREComparison);
   }, [storeId, month, year]);
 
   useEffect(() => { load(); }, [load]);
