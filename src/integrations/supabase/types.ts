@@ -2162,7 +2162,7 @@ export type Database = {
           document_type: string
           fiscal_status: string
           id: string
-          invoice_number: string
+          invoice_number: string | null
           issue_date: string
           notes: string | null
           pdf_path: string | null
@@ -2193,7 +2193,7 @@ export type Database = {
           document_type: string
           fiscal_status?: string
           id?: string
-          invoice_number: string
+          invoice_number?: string | null
           issue_date: string
           notes?: string | null
           pdf_path?: string | null
@@ -2224,7 +2224,7 @@ export type Database = {
           document_type?: string
           fiscal_status?: string
           id?: string
-          invoice_number?: string
+          invoice_number?: string | null
           issue_date?: string
           notes?: string | null
           pdf_path?: string | null
@@ -5033,6 +5033,7 @@ export type Database = {
         Args: { p_store_id: string }
         Returns: Json
       }
+      _criar_pendencia_fiscal: { Args: { p_sale_id: string }; Returns: string }
       _has_automation_permission: {
         Args: { p_store_id: string }
         Returns: boolean
@@ -6115,6 +6116,8 @@ export type Database = {
           pending_count: number
           period_count: number
           sent_count: number
+          to_issue_amount: number
+          to_issue_count: number
         }[]
       }
       get_itau_webhook_secret: {
@@ -6640,6 +6643,23 @@ export type Database = {
           admin_email: string
           changed_at: string
           module_key: string
+        }[]
+      }
+      list_sales_without_fiscal_document: {
+        Args: {
+          p_limit?: number
+          p_month?: number
+          p_store_id: string
+          p_year?: number
+        }
+        Returns: {
+          customer_id: string
+          customer_name: string
+          net_total: number
+          payment_status: string
+          sale_date: string
+          sale_id: string
+          seller_name: string
         }[]
       }
       list_stores_with_connect: {

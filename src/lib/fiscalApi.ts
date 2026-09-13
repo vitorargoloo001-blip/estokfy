@@ -8,7 +8,10 @@ export const FISCAL_BUCKET = 'fiscal-documents';
 // número só existe para o caso de a RPC não devolver nada.
 export const FISCAL_ALERT_DAYS_DEFAULT = 15;
 
-export type FiscalStatus = 'pending' | 'sent_to_accountant' | 'declared' | 'cancelled';
+// 'a_emitir' é pendência gerada a partir da venda: ainda NÃO é nota fiscal
+// (sem número e sem chave, que só a SEFAZ autoriza). Vira nota de verdade
+// quando alguém informa o número ou anexa o XML.
+export type FiscalStatus = 'a_emitir' | 'pending' | 'sent_to_accountant' | 'declared' | 'cancelled';
 export type FiscalDocumentType = 'nfe' | 'nfce' | 'nfse' | 'entrada' | 'saida' | 'outro';
 export type FiscalDirection = 'incoming' | 'outgoing';
 
@@ -48,6 +51,8 @@ export interface FiscalSummary {
   pending_amount: number;
   overdue_count: number;
   alert_days: number;
+  to_issue_count: number;
+  to_issue_amount: number;
 }
 
 export interface FiscalDocumentInput {
@@ -125,6 +130,8 @@ export async function getFiscalSummary(
     pending_amount: Number(row.pending_amount) || 0,
     overdue_count: Number(row.overdue_count) || 0,
     alert_days: Number(row.alert_days) || FISCAL_ALERT_DAYS_DEFAULT,
+    to_issue_count: Number(row.to_issue_count) || 0,
+    to_issue_amount: Number(row.to_issue_amount) || 0,
   };
 }
 
@@ -214,6 +221,7 @@ export async function getFiscalFileUrl(path: string): Promise<string | null> {
 }
 
 export const FISCAL_STATUS_LABEL: Record<FiscalStatus, string> = {
+  a_emitir: 'Nota a emitir',
   pending: 'Pendente de declaração',
   sent_to_accountant: 'Enviada ao contador',
   declared: 'Declarada',

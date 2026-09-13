@@ -33,7 +33,27 @@ Tabela única `fiscal_documents` (multi-tenant por `store_id`).
 
 - `document_type`: `nfe | nfce | nfse | entrada | saida | outro`
 - `direction`: `incoming | outgoing`
-- `fiscal_status`: `pending | sent_to_accountant | declared | cancelled`
+- `fiscal_status`: `a_emitir | pending | sent_to_accountant | declared | cancelled`
+
+**`a_emitir` não é nota fiscal.** É a pendência gerada automaticamente a partir
+da venda, para nenhuma venda passar batida. Nasce sem `invoice_number` e sem
+`access_key` — número, série e chave são autorizados pela SEFAZ, e o Estokfy não
+emite. **Nunca preencher esses campos com valor inventado:** a relação que vai
+para o contador passaria a conter documentos inexistentes, e as notas reais
+colidiriam com os números falsos na importação do XML.
+
+Informar o número (ou anexar o XML) promove a pendência a `pending` no mesmo
+registro, já vinculada à venda — é o que `update_fiscal_document` faz. Sair de
+`a_emitir` sem número é recusado com `numero_nota_obrigatorio`, exceto para
+cancelar. A constraint `fiscal_documents_numero_obrigatorio` garante isso no
+banco, não só na aplicação.
+
+Quem cria: o gatilho `trg_sales_fiscal_pendencia` (AFTER INSERT em `sales`) e o
+backfill `20260913000002`, com corte em 2026-09-01 — meses anteriores o contador
+já fechou. O gatilho engole exceções de propósito: registrar venda é o caminho
+crítico da operação e nenhuma falha do fiscal pode derrubar uma venda. A rede de
+segurança é `list_sales_without_fiscal_document`, que deriva a lista direto de
+`sales` e não depende do gatilho ter funcionado.
 - Competência separada da emissão (`competence_month`/`competence_year`) — é ela
   que responde "o que precisa ser tratado em setembro/2026".
 - Vínculos **opcionais**: `sale_id`, `customer_id`, `supplier_id`. Nota sem venda

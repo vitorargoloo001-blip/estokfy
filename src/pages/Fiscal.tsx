@@ -30,6 +30,7 @@ const MONTHS = [
 ];
 
 const STATUS_VARIANT: Record<FiscalStatus, string> = {
+  a_emitir: 'bg-violet-500/15 text-violet-700 dark:text-violet-400',
   pending: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
   sent_to_accountant: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
   declared: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
@@ -108,7 +109,7 @@ export default function Fiscal() {
   const exportRows = useMemo(
     () =>
       rows.map(r => [
-        r.invoice_number,
+        r.invoice_number || '(a emitir)',
         r.series || '-',
         FISCAL_TYPE_LABEL[r.document_type],
         FISCAL_DIRECTION_LABEL[r.direction],
@@ -138,6 +139,7 @@ export default function Fiscal() {
 
   const cards = summary
     ? [
+        { label: 'A emitir (vindas de vendas)', value: String(summary.to_issue_count), accent: summary.to_issue_count > 0 ? 'text-violet-600 dark:text-violet-400' : '' },
         { label: 'Notas no período', value: String(summary.period_count), accent: '' },
         { label: 'Pendentes de declaração', value: String(summary.pending_count), accent: summary.pending_count > 0 ? 'text-amber-600 dark:text-amber-400' : '' },
         { label: 'Valor pendente', value: fmtMoney(summary.pending_amount), accent: '' },
@@ -188,7 +190,7 @@ export default function Fiscal() {
       )}
 
       {canManage && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           {(loading && !summary ? Array.from({ length: 5 }) : cards).map((c, i) => (
             <Card key={i}>
               <CardContent className="p-4">
@@ -268,7 +270,7 @@ export default function Fiscal() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-medium">
-                      {FISCAL_TYPE_LABEL[r.document_type]} {r.invoice_number}
+                      {FISCAL_TYPE_LABEL[r.document_type]} {r.invoice_number || '— a emitir'}
                       {r.series ? `/${r.series}` : ''}
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -307,7 +309,7 @@ export default function Fiscal() {
               {rows.map(r => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">
-                    {r.invoice_number}{r.series ? `/${r.series}` : ''}
+                    {r.invoice_number ? `${r.invoice_number}${r.series ? `/${r.series}` : ''}` : <span className="text-muted-foreground italic">a emitir</span>}
                     {(r.xml_path || r.pdf_path) && (
                       <Paperclip className="inline ml-1 h-3 w-3 text-muted-foreground" />
                     )}
