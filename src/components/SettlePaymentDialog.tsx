@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { cents, validPaymentAmount } from '@/lib/receivables';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
   const [paidAt, setPaidAt] = useState<Date>(new Date());
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submitLock = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -49,26 +51,28 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
   }, [open, amountPending]);
 
   const handleSubmit = async () => {
+    if (submitLock.current) return;
     if (!saleId) return;
-    if (!Number.isFinite(amount) || amount <= 0) { toast.error('Valor inválido'); return; }
-    if (amount > amountPending + 0.01) { toast.error(`Valor máximo: ${fmt(amountPending)}`); return; }
+    if (!validPaymentAmount(amount)) { toast.error('Valor inválido'); return; }
+    if (cents(amount) > cents(amountPending)) { toast.error(`Valor máximo: ${fmt(amountPending)}`); return; }
     if (note.length > 500) { toast.error('A observação pode ter no máximo 500 caracteres.'); return; }
 
+    submitLock.current = true;
     setSubmitting(true);
     try {
       // Revalida o saldo devedor direto no banco antes de enviar — a prop
       // `amountPending` é um snapshot de quando a tela/lista foi carregada e
       // pode estar desatualizada. A RPC também trava isso, mas revalidar aqui
       // evita uma rejeição confusa e mostra o valor real ao usuário.
-      const { data: freshSale } = await supabase
+      const { data: freshSale, error: refreshError } = await supabase
         .from('sales')
         .select('amount_pending')
-        .eq('id', saleId)
+        .eq('id', saleId).is('deleted_at', null).neq('status', 'cancelled')
         .maybeSingle();
+      if (refreshError || !freshSale) throw new Error('Não foi possível conferir o saldo atual. Atualize as contas.');
       const currentPending = freshSale ? Number(freshSale.amount_pending) : amountPending;
-      if (amount > currentPending + 0.01) {
+      if (cents(amount) > cents(currentPending)) {
         toast.error(`O saldo devedor mudou. Valor atual: ${fmt(currentPending)}. Atualize a tela e tente novamente.`);
-        setSubmitting(false);
         onSettled?.();
         return;
       }
@@ -77,7 +81,7 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
         headers: { 'Idempotency-Key': crypto.randomUUID() },
         body: {
           sale_id: saleId,
-          payments: [{ method, amount }],
+          payments: [{ method, amount: cents(amount) / 100 }],
           paid_at: paidAt.toISOString(),
           note: note.trim() || null,
         },
@@ -85,13 +89,15 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
       toast.success(result.payment_status === 'paid' ? 'Venda quitada!' : 'Pagamento registrado!');
       onOpenChange(false);
       onSettled?.();
-    } catch (err: any) {
-      toast.error(err?.message || 'Erro ao registrar pagamento');
-    } finally { setSubmitting(false); }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao registrar pagamento');
+      onOpenChange(false);
+      onSettled?.();
+    } finally { submitLock.current = false; setSubmitting(false); }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={next => { if (!submitLock.current) onOpenChange(next); }}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Receber pagamento</DialogTitle></DialogHeader>
         <div className="space-y-4">
@@ -123,7 +129,7 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar mode="single" selected={paidAt} onSelect={d => d && setPaidAt(d)} initialFocus className={cn('p-3 pointer-events-auto')} />
+                <Calendar mode="single" selected={paidAt} onSelect={d => d && setPaidAt(d)} disabled={{ after: new Date() }} initialFocus className={cn('p-3 pointer-events-auto')} />
               </PopoverContent>
             </Popover>
           </div>
@@ -141,7 +147,7 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
             <p className="text-xs text-muted-foreground text-right">{note.length}/500</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" className="flex-1 h-11" onClick={() => onOpenChange(false)}>Cancelar</Button>
+            <Button variant="outline" className="flex-1 h-11" disabled={submitting} onClick={() => onOpenChange(false)}>Cancelar</Button>
             <Button className="flex-1 h-11" disabled={submitting || amount <= 0} onClick={handleSubmit}>
               {submitting ? 'Registrando...' : 'Confirmar'}
             </Button>

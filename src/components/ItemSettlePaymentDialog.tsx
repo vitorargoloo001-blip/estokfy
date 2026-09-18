@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { cents, validPaymentAmount, runPaymentSequence } from '@/lib/receivables';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarIcon } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/api';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -57,6 +57,7 @@ export default function ItemSettlePaymentDialog({ customerName, sales, open, onO
   const [paidAt, setPaidAt] = useState<Date>(new Date());
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submitLock = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -91,89 +92,52 @@ export default function ItemSettlePaymentDialog({ customerName, sales, open, onO
   const total = Object.values(selected).reduce((s, v) => s + v, 0);
 
   const handleSubmit = async () => {
+    if (submitLock.current) return;
     if (selectedCount === 0) { toast.error('Selecione ao menos um item'); return; }
-    if (total <= 0) { toast.error('Valor inválido'); return; }
-    if (note.length > 500) { toast.error('A observação pode ter no máximo 500 caracteres.'); return; }
-
-    setSubmitting(true);
-    const paidIso = paidAt.toISOString();
-
-    // Revalida o saldo real de cada item direto no banco antes de enviar —
-    // `sales` é um snapshot de quando o diálogo abriu. A RPC também trava
-    // isso (não aceita mais que o saldo real do item), mas revalidar aqui
-    // evita rejeições desnecessárias, mesmo padrão já usado em
-    // SettlePaymentDialog/BatchSettlePaymentDialog.
-    const freshBalanceById = new Map<string, number>();
-    try {
-      const itemIds = Object.keys(selected);
-      const [itemsRes, allocRes] = await Promise.all([
-        supabase.from('sale_items').select('id, line_total').in('id', itemIds),
-        supabase.from('payment_allocations').select('sale_item_id, amount').in('sale_item_id', itemIds),
-      ]);
-      const allocatedById = new Map<string, number>();
-      for (const row of allocRes.data || []) {
-        allocatedById.set(row.sale_item_id, (allocatedById.get(row.sale_item_id) || 0) + Number(row.amount));
-      }
-      for (const row of itemsRes.data || []) {
-        freshBalanceById.set(row.id, Number(row.line_total) - (allocatedById.get(row.id) || 0));
-      }
-    } catch {
-      // Se a revalidação falhar, segue com o snapshot local — a trava da RPC
-      // ainda protege contra sobra sendo aceita indevidamente.
+    if (!validPaymentAmount(total) || Object.values(selected).some(v => !validPaymentAmount(v))) {
+      toast.error('Informe valores positivos com no máximo duas casas decimais.'); return;
     }
-
-    // Agrupa os itens marcados por venda -- um payment por venda, mesmo
-    // padrão já usado em BatchSettlePaymentDialog para "por valor".
+    if (note.length > 500) { toast.error('A observação pode ter no máximo 500 caracteres.'); return; }
     const bySale = new Map<string, { sale_item_id: string; amount: number }[]>();
     for (const [itemId, amount] of Object.entries(selected)) {
       const saleId = itemToSale.get(itemId);
-      if (!saleId) continue;
-      const capped = Math.min(amount, freshBalanceById.has(itemId) ? freshBalanceById.get(itemId)! : amount);
-      const rounded = Math.round(capped * 100) / 100;
-      if (rounded <= 0) continue;
+      const item = sales.find(s => s.id === saleId)?.items.find(it => it.id === itemId);
+      if (!saleId || !item || cents(amount) > cents(item.balance)) {
+        toast.error('Os itens mudaram. Feche a janela e confira os saldos.'); return;
+      }
       const list = bySale.get(saleId) || [];
-      list.push({ sale_item_id: itemId, amount: rounded });
+      list.push({ sale_item_id: itemId, amount: cents(amount) / 100 });
       bySale.set(saleId, list);
     }
-
-    let okCount = 0;
-    const errs: string[] = [];
+    submitLock.current = true;
+    setSubmitting(true);
     try {
-      for (const [saleId, allocations] of bySale) {
-        try {
-          await invokeEdgeFunction('sales-settle-items-payment', {
-            headers: { 'Idempotency-Key': crypto.randomUUID() },
-            body: {
-              sale_id: saleId,
-              item_allocations: allocations,
-              method,
-              paid_at: paidIso,
-              note: note.trim() ? `[Por item] ${note.trim()}` : `[Por item] Baixa por peça — ${customerName}`,
-            },
-          });
-          okCount++;
-        } catch (e: any) {
-          errs.push(`#${saleId.slice(0, 6)}: ${e?.message || 'erro'}`);
-        }
-      }
-
-      if (okCount > 0 && errs.length === 0) {
-        toast.success(`Baixa registrada em ${okCount} venda(s)`);
-        onOpenChange(false);
-        onSettled?.();
-      } else if (okCount > 0 && errs.length > 0) {
-        toast.warning(`Parcial: ${okCount} ok, ${errs.length} com erro`);
-        onSettled?.();
+      // The RPC locks the sale and validates the exact requested values atomically.
+      const result = await runPaymentSequence([...bySale], ([saleId, allocations]) =>
+        invokeEdgeFunction('sales-settle-items-payment', {
+          headers: { 'Idempotency-Key': crypto.randomUUID() },
+          body: {
+            sale_id: saleId, item_allocations: allocations, method,
+            paid_at: paidAt.toISOString(),
+            note: (note.trim() ? '[Por item] ' + note.trim() : '[Por item] Baixa por peça — ' + customerName).slice(0, 500),
+          },
+        }));
+      if (result.error) {
+        toast.error('Processamento interrompido. ' + result.completed + ' venda(s) confirmada(s). Confira os recebimentos antes de tentar novamente.');
       } else {
-        toast.error(errs[0] || 'Falha ao registrar baixa');
+        toast.success('Baixa registrada em ' + result.completed + ' venda(s)');
       }
+      setSelected({});
+      onOpenChange(false);
+      onSettled?.();
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={next => { if (!submitLock.current) onOpenChange(next); }}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Dar baixa por item — {customerName}</DialogTitle>
@@ -261,7 +225,7 @@ export default function ItemSettlePaymentDialog({ customerName, sales, open, onO
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar mode="single" selected={paidAt} onSelect={d => d && setPaidAt(d)} initialFocus className={cn('p-3 pointer-events-auto')} />
+                  <Calendar mode="single" selected={paidAt} onSelect={d => d && setPaidAt(d)} disabled={{ after: new Date() }} initialFocus className={cn('p-3 pointer-events-auto')} />
                 </PopoverContent>
               </Popover>
             </div>
