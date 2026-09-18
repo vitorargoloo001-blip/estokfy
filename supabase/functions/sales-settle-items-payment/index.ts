@@ -36,10 +36,16 @@ Deno.serve(async (req) => {
 
     const noteClean = typeof note === "string" ? note.trim().slice(0, 500) : null;
 
+    // Authorize before any service-role lookup or cached response.
+    const { data: profile, error: profileError } = await userClient.from("profiles")
+      .select("store_id, role, is_active").eq("auth_user_id", user.id).maybeSingle();
+    if (profileError || !profile?.is_active || !["owner", "admin", "manager", "sales", "finance"].includes(profile.role)) {
+      return json({ error: "sem_permissao", message: "Sem permissão para quitar venda." }, 403);
+    }
     const svc = createClient(SB_URL, SB_SERVICE);
 
     // Look up store_id from sale to scope idempotency + store-access check
-    const { data: saleRow } = await svc.from("sales").select("store_id").eq("id", sale_id).maybeSingle();
+    const { data: saleRow } = await svc.from("sales").select("store_id").eq("id", sale_id).eq("store_id", profile.store_id).is("deleted_at", null).neq("status", "cancelled").maybeSingle();
     if (!saleRow) return json({ error: "venda_nao_encontrada", message: "Venda não encontrada." }, 404);
 
     const { data: storeData } = await svc.from("stores").select("access_enabled, subscription_status").eq("id", saleRow.store_id).single();
@@ -51,12 +57,15 @@ Deno.serve(async (req) => {
 
     const { data: existing } = await svc
       .from("idempotency_keys")
-      .select("response_json")
+      .select("response_json, request_hash, action")
       .eq("store_id", saleRow.store_id)
       .eq("idem_key", idemKey)
       .maybeSingle();
 
     if (existing) {
+      if (existing.request_hash !== requestHash || existing.action !== "sales-settle-items-payment") {
+        return json({ error: "idempotency_conflict", message: "Chave já utilizada para outra operação." }, 409);
+      }
       if (existing.response_json) return json(existing.response_json as Record<string, unknown>, 200);
       return json({ error: "idempotency_conflict", message: "Requisição em andamento" }, 409);
     }
@@ -83,6 +92,8 @@ Deno.serve(async (req) => {
     if (rpcErr) {
       await svc.from("idempotency_keys").delete().eq("store_id", saleRow.store_id).eq("idem_key", idemKey);
       const msg = rpcErr.message || "";
+      if (msg.includes("data_recebimento_invalida")) return json({ error: "data_recebimento_invalida", message: "Informe uma data de recebimento válida, até hoje." }, 400);
+      if (msg.includes("saldo_itens_divergente")) return json({ error: "saldo_itens_divergente", message: "O saldo dos itens difere do saldo da venda. Utilize o recebimento por valor." }, 400);
       if (msg.includes("venda_nao_encontrada")) return json({ error: "venda_nao_encontrada", message: "Venda não encontrada." }, 404);
       if (msg.includes("observacao_muito_longa")) return json({ error: "observacao_muito_longa", message: "A observação pode ter no máximo 500 caracteres." }, 400);
       if (msg.includes("venda_ja_quitada")) return json({ error: "venda_ja_quitada", message: "Venda já está quitada." }, 400);

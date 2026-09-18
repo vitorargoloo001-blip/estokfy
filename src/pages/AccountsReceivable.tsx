@@ -1,4 +1,7 @@
-import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
+import { useEffect, useState, useMemo, Fragment } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { todayStrBR } from '@/lib/dateBR';
+import { cents, fetchAllRows, itemBalancesMatch } from '@/lib/receivables';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -27,6 +30,7 @@ interface SaleItemLite {
   id: string;
   qty: number;
   unit_price: number;
+  line_total: number;
   product_name_snapshot: string | null;
   products: { name: string } | null;
 }
@@ -85,7 +89,7 @@ interface CustomerGroup {
 
 const fmt = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = todayStrBR;
 
 // Deterministic avatar color based on name
 const AVATAR_COLORS = [
@@ -126,8 +130,6 @@ export default function AccountsReceivable() {
   const { canManageEmployees, canManageReceivables } = usePermissions();
   const canBatchSettle = canManageReceivables;
   const isMobile = useIsMobile();
-  const [sales, setSales] = useState<PendingSale[]>([]);
-  const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'overdue' | 'upcoming'>('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -135,8 +137,8 @@ export default function AccountsReceivable() {
   const [sellerId, setSellerId] = useState<string | null>(null);
   const [paymentModeOpen, setPaymentModeOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [paymentTarget, setPaymentTarget] = useState<{ name: string; sales: PendingSale[]; items: SettleSaleGroup[]; itemsReady: boolean } | null>(null);
   const [itemSettleOpen, setItemSettleOpen] = useState(false);
-  const [itemPaid, setItemPaid] = useState<Record<string, number>>({});
   const [statementOpen, setStatementOpen] = useState(false);
   const [statementScope, setStatementScope] = useState<'all' | 'overdue'>('all');
   const [statementAction, setStatementAction] = useState<'pdf' | 'whatsapp'>('pdf');
@@ -150,34 +152,28 @@ export default function AccountsReceivable() {
     });
   };
 
-  const fetchData = useCallback(async () => {
-    if (!profile) return;
-    setLoading(true);
-    let q = supabase
-      .from('sales')
-      .select(
-        'id, created_at, net_total, amount_paid, amount_pending, payment_status, due_date, notes, customer_id, customers(name, phone), sale_items(id, qty, unit_price, product_name_snapshot, products(name))',
-      )
-      .eq('store_id', profile.store_id)
-      .is('deleted_at', null)
-      .in('payment_status', ['pending', 'partial']);
-    if (sellerId) q = q.eq('created_by', sellerId);
-    const { data } = await q.order('due_date', { ascending: true, nullsFirst: false });
-    setSales((data as any) || []);
-    setLoading(false);
-  }, [profile, sellerId]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const { data: sales = [], isFetching: loading, error: loadError, dataUpdatedAt: salesUpdatedAt, refetch: fetchData } = useQuery({
+    queryKey: ['sales', 'receivables', profile?.store_id, sellerId],
+    enabled: !!profile?.store_id,
+    queryFn: () => fetchAllRows<PendingSale>((from, to) => {
+      let query = supabase.from('sales').select(
+        'id, created_at, net_total, amount_paid, amount_pending, payment_status, due_date, notes, customer_id, customers(name, phone), sale_items(id, qty, unit_price, line_total, product_name_snapshot, products(name))',
+      ).eq('store_id', profile!.store_id).is('deleted_at', null)
+        .neq('status', 'cancelled').gt('amount_pending', 0)
+        .in('payment_status', ['pending', 'partial']);
+      if (sellerId) query = query.eq('created_by', sellerId);
+      return query.order('due_date', { ascending: true, nullsFirst: false })
+        .order('id').range(from, to);
+    }),
+  });
 
   const today = todayISO();
-  const isOverdue = (s: PendingSale) => s.due_date && s.due_date < today;
+  const isOverdue = (s: PendingSale) => !!s.due_date && s.due_date < today;
 
   // Filtered sales by status filter
   const filteredSales = useMemo(() => {
     return sales.filter((s) => {
-      if (filter === 'overdue') return !!isOverdue(s);
+      if (filter === 'overdue') return !!s.due_date && s.due_date < today;
       if (filter === 'upcoming') return !s.due_date || s.due_date >= today;
       return true;
     });
@@ -231,33 +227,29 @@ export default function AccountsReceivable() {
 
   const selected = visibleGroups.find((g) => g.id === selectedId) || null;
 
-  // Soma de payment_allocations por item, só para os itens do cliente
-  // selecionado (recarrega ao trocar de cliente ou depois de uma baixa).
-  useEffect(() => {
-    const itemIds = (selected?.sales || []).flatMap((s) => (s.sale_items || []).map((it) => it.id));
-    if (itemIds.length === 0) {
-      setItemPaid({});
-      return;
-    }
-    let cancelled = false;
-    supabase
-      .from('payment_allocations')
-      .select('sale_item_id, amount')
-      .in('sale_item_id', itemIds)
-      .then(({ data }) => {
-        if (cancelled) return;
-        const map: Record<string, number> = {};
-        for (const row of data || []) {
-          map[row.sale_item_id] = (map[row.sale_item_id] || 0) + Number(row.amount);
-        }
-        setItemPaid(map);
-      });
-    return () => { cancelled = true; };
-  }, [selected?.id, selected?.sales]);
+  const selectedSaleIds = (selected?.sales || []).map(s => s.id);
+  const { data: itemPaid = {}, isFetching: itemsLoading, error: itemsError } = useQuery({
+    queryKey: ['payment_allocations', 'sales', profile?.store_id, selectedSaleIds, salesUpdatedAt],
+    enabled: !!profile?.store_id && selectedSaleIds.length > 0,
+    queryFn: async () => {
+      const map: Record<string, number> = {};
+      for (let offset = 0; offset < selectedSaleIds.length; offset += 100) {
+        const rows = await fetchAllRows<{ sale_item_id: string; amount: number }>((from, to) =>
+          supabase.from('payment_allocations').select('sale_item_id, amount')
+            .eq('store_id', profile!.store_id).in('sale_id', selectedSaleIds.slice(offset, offset + 100))
+            .order('id').range(from, to));
+        for (const row of rows) map[row.sale_item_id] = (map[row.sale_item_id] || 0) + Number(row.amount);
+      }
+      return map;
+    },
+  });
+  const itemBalancesReady = !itemsLoading && !itemsError && (selected?.sales || []).every(
+    s => itemBalancesMatch(Number(s.amount_pending), s.sale_items || [], itemPaid),
+  );
 
   const itemBalance = (it: SaleItemLite): number => {
-    const lineTotal = it.qty * it.unit_price;
-    return Math.max(0, lineTotal - (itemPaid[it.id] || 0));
+    const lineTotal = Number(it.line_total);
+    return Math.max(0, cents(lineTotal) - cents(itemPaid[it.id] || 0)) / 100;
   };
 
   const itemSettleGroups: SettleSaleGroup[] = (selected?.sales || [])
@@ -270,7 +262,7 @@ export default function AccountsReceivable() {
           id: it.id,
           name: itemName(it),
           qty: it.qty,
-          line_total: it.qty * it.unit_price,
+          line_total: Number(it.line_total),
           paid: itemPaid[it.id] || 0,
           balance: itemBalance(it),
         }))
@@ -302,7 +294,7 @@ export default function AccountsReceivable() {
           itemName(it),
           it.qty,
           Number(it.unit_price),
-          Number(it.unit_price) * it.qty,
+          Number(it.line_total),
           idx === 0 ? Number(s.net_total) : '',
           idx === 0 ? Number(s.amount_paid) : '',
           idx === 0 ? Number(s.amount_pending) : '',
@@ -411,7 +403,7 @@ export default function AccountsReceivable() {
         <span className="w-16 text-center shrink-0">Status</span>
       </div>
       {items.map((it, idx) => {
-        const lineTotal = it.qty * it.unit_price;
+        const lineTotal = Number(it.line_total);
         const paid = itemPaid[it.id] || 0;
         const balance = itemBalance(it);
         const status = balance <= 0 ? 'Pago' : paid > 0 ? 'Parcial' : 'Pendente';
@@ -420,8 +412,8 @@ export default function AccountsReceivable() {
             <span className="flex-1 min-w-0 break-words">{itemName(it)}</span>
             <span className="w-10 text-right shrink-0 text-muted-foreground">{it.qty}</span>
             <span className="w-20 text-right shrink-0 font-medium">{fmt(lineTotal)}</span>
-            <span className="w-20 text-right shrink-0 text-emerald-600">{fmt(paid)}</span>
-            <span className="w-20 text-right shrink-0 font-semibold text-destructive">{fmt(balance)}</span>
+            <span className="w-20 text-right shrink-0 text-emerald-600">{itemBalancesReady ? fmt(paid) : '—'}</span>
+            <span className="w-20 text-right shrink-0 font-semibold text-destructive">{itemBalancesReady ? fmt(balance) : '—'}</span>
             <span className="w-16 text-center shrink-0">
               <Badge
                 className={cn(
@@ -431,7 +423,7 @@ export default function AccountsReceivable() {
                     : 'bg-destructive/10 text-destructive border border-destructive/20',
                 )}
               >
-                {status}
+                {itemBalancesReady ? status : 'Conferir'}
               </Badge>
             </span>
           </div>
@@ -506,7 +498,7 @@ export default function AccountsReceivable() {
               </>
             )}
             {canBatchSettle && selected.sales.length > 0 && (
-              <Button size="lg" className="h-12" onClick={() => setPaymentModeOpen(true)}>
+              <Button size="lg" className="h-12" disabled={loading || !!loadError} onClick={() => { setPaymentTarget({ name: selected.name, sales: selected.sales, items: itemSettleGroups, itemsReady: itemBalancesReady }); setPaymentModeOpen(true); }}>
                 <DollarIcon className="h-4 w-4 mr-1.5" />
                 Lançar pagamento
               </Button>
@@ -515,6 +507,9 @@ export default function AccountsReceivable() {
         </div>
 
 
+        {!itemBalancesReady && <p role="status" className="text-sm text-muted-foreground">
+          {itemsLoading ? 'Conferindo os recebimentos por item…' : 'O detalhamento por item não está disponível. Descontos, frete, devoluções ou pagamentos antigos podem alterar essa distribuição. Utilize o saldo da venda e o recebimento por valor.'}
+        </p>}
         {/* Table desktop / Cards mobile */}
         {isMobile ? (
           <div className="space-y-2">
@@ -686,6 +681,10 @@ export default function AccountsReceivable() {
         description={`${filteredSales.length} venda(s) pendente(s)`}
       />
 
+      {loadError && <div role="alert" className="rounded-lg border border-destructive p-4">
+        Não foi possível atualizar as contas a receber. Os valores podem estar desatualizados.
+        <Button variant="outline" className="ml-2" onClick={() => void fetchData()}>Tentar novamente</Button>
+      </div>}
       {/* KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Card>
@@ -778,7 +777,7 @@ export default function AccountsReceivable() {
       <Dialog open={paymentModeOpen} onOpenChange={setPaymentModeOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Lançar pagamento — {selected?.name || ''}</DialogTitle>
+            <DialogTitle>Lançar pagamento — {paymentTarget?.name || ''}</DialogTitle>
             <DialogDescription>Como você quer dar baixa?</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -795,13 +794,14 @@ export default function AccountsReceivable() {
             </button>
             <button
               type="button"
+              disabled={!paymentTarget?.itemsReady}
               onClick={() => { setPaymentModeOpen(false); setItemSettleOpen(true); }}
               className="flex flex-col items-center gap-2 rounded-lg border p-4 text-center hover:bg-muted/50 hover:border-primary/40 transition-colors"
             >
               <ListChecks className="h-6 w-6 text-primary" />
               <span className="text-sm font-medium">Por item</span>
               <span className="text-[11px] text-muted-foreground">
-                Escolha as peças específicas que o cliente está pagando.
+                {paymentTarget?.itemsReady ? 'Escolha as peças específicas que o cliente está pagando.' : 'Saldos dos itens indisponíveis ou diferentes do saldo da venda. Utilize Por valor.'}
               </span>
             </button>
           </div>
@@ -809,8 +809,8 @@ export default function AccountsReceivable() {
       </Dialog>
 
       <BatchSettlePaymentDialog
-        customerName={selected?.name || ''}
-        sales={(selected?.sales || []).map((s) => ({
+        customerName={paymentTarget?.name || ''}
+        sales={(paymentTarget?.sales || []).map((s) => ({
           id: s.id,
           created_at: s.created_at,
           due_date: s.due_date,
@@ -819,15 +819,15 @@ export default function AccountsReceivable() {
         }))}
         open={batchOpen}
         onOpenChange={setBatchOpen}
-        onSettled={fetchData}
+        onSettled={() => { void fetchData(); }}
       />
 
       <ItemSettlePaymentDialog
-        customerName={selected?.name || ''}
-        sales={itemSettleGroups}
+        customerName={paymentTarget?.name || ''}
+        sales={paymentTarget?.items || []}
         open={itemSettleOpen}
         onOpenChange={setItemSettleOpen}
-        onSettled={fetchData}
+        onSettled={() => { void fetchData(); }}
       />
 
       <Dialog open={statementOpen} onOpenChange={setStatementOpen}>
@@ -840,11 +840,11 @@ export default function AccountsReceivable() {
               Escolha quais títulos incluir no extrato de {selected?.name || ''}.
             </DialogDescription>
           </DialogHeader>
-          <RadioGroup value={statementScope} onValueChange={(v) => setStatementScope(v as any)} className="space-y-2">
+          <RadioGroup value={statementScope} onValueChange={(v) => setStatementScope(v as 'all' | 'overdue')} className="space-y-2">
             <div className="flex items-center gap-2 p-3 rounded-md border">
               <RadioGroupItem value="all" id="scope-all" />
               <Label htmlFor="scope-all" className="cursor-pointer flex-1">
-                Todas as pendências
+                Todas as pendências exibidas
                 <span className="block text-xs text-muted-foreground">
                   {selected?.sales.length || 0} título(s)
                 </span>
@@ -894,13 +894,13 @@ export default function AccountsReceivable() {
                 amount_pending: Number(s.amount_pending),
                 payment_status: s.payment_status,
                 overdue: !!isOverdue(s),
-                items: (s.sale_items || []).map((it) => ({
+                items: itemBalancesReady ? (s.sale_items || []).map((it) => ({
                   name: itemName(it),
                   qty: it.qty,
                   unit_price: Number(it.unit_price),
                   amount_paid: itemPaid[it.id] || 0,
                   amount_pending: itemBalance(it),
-                })),
+                })) : [],
               }));
 
               const doc = generateCustomerStatementPDF({

@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { cents, validPaymentAmount, runPaymentSequence } from '@/lib/receivables';
+import { todayStrBR } from '@/lib/dateBR';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -52,7 +54,7 @@ export default function BatchSettlePaymentDialog({ customerName, sales, open, on
   // 2) sem vencimento, mais antigas (created_at asc)
   // 3) a vencer (due_date >= hoje, asc)
   const ordered = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayStrBR();
     const bucket = (s: BatchSale) => {
       if (!s.due_date) return 1;
       return s.due_date < today ? 0 : 2;
@@ -75,6 +77,7 @@ export default function BatchSettlePaymentDialog({ customerName, sales, open, on
   const [paidAt, setPaidAt] = useState<Date>(new Date());
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submitLock = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -88,73 +91,53 @@ export default function BatchSettlePaymentDialog({ customerName, sales, open, on
   const remaining = Math.max(0, totalPending - amount);
 
   const handleSubmit = async () => {
+    if (submitLock.current) return;
     if (sales.length === 0) return;
-    if (!Number.isFinite(amount) || amount <= 0) { toast.error('Valor inválido'); return; }
-    if (amount > totalPending + 0.01) { toast.error(`Valor máximo: ${fmt(totalPending)}`); return; }
+    if (!validPaymentAmount(amount)) { toast.error('Valor inválido'); return; }
+    if (cents(amount) > cents(totalPending)) { toast.error(`Valor máximo: ${fmt(totalPending)}`); return; }
     if (note.length > 500) { toast.error('A observação pode ter no máximo 500 caracteres.'); return; }
 
+    submitLock.current = true;
     setSubmitting(true);
-    let remainder = amount;
-    let okCount = 0;
-    const errs: string[] = [];
-    const paidIso = paidAt.toISOString();
-
-    // Revalida o saldo devedor de cada venda direto no banco antes de distribuir
-    // o valor — a lista em `sales` é um snapshot de quando o diálogo abriu e
-    // pode estar desatualizada. A RPC também trava isso (não aceita mais do
-    // que o saldo real), mas revalidar aqui evita rejeições desnecessárias.
-    const freshPendingById = new Map<string, number>();
     try {
-      const { data: freshSales } = await supabase
-        .from('sales')
-        .select('id, amount_pending')
-        .in('id', ordered.map((s) => s.id));
-      for (const row of freshSales || []) {
-        freshPendingById.set(row.id, Number(row.amount_pending));
+      const freshPendingById = new Map<string, number>();
+      for (let offset = 0; offset < ordered.length; offset += 100) {
+        const { data, error } = await supabase.from('sales').select('id, amount_pending')
+          .in('id', ordered.slice(offset, offset + 100).map(s => s.id))
+          .is('deleted_at', null).neq('status', 'cancelled');
+        if (error) throw error;
+        for (const row of data || []) freshPendingById.set(row.id, Number(row.amount_pending));
       }
-    } catch {
-      // Se a revalidação falhar, segue com o snapshot local — a trava da RPC
-      // ainda protege contra sobra sendo aceita indevidamente.
-    }
-
-    try {
-      for (let i = 0; i < ordered.length; i++) {
-        if (remainder <= 0.0001) break;
-        const s = ordered[i];
-        const currentPending = freshPendingById.has(s.id) ? freshPendingById.get(s.id)! : s.amount_pending;
-        const pay = Math.min(currentPending, remainder);
-        // Round to 2 decimals to avoid float drift
-        const payRounded = Math.round(pay * 100) / 100;
-        if (payRounded <= 0) continue;
-
-        try {
-          await invokeEdgeFunction('sales-settle-payment', {
-            headers: { 'Idempotency-Key': crypto.randomUUID() },
-            body: {
-              sale_id: s.id,
-              payments: [{ method, amount: payRounded }],
-              paid_at: paidIso,
-              note: note.trim() ? `[Lote] ${note.trim()}` : `[Lote] Recebimento agrupado — ${customerName}`,
-            },
-          });
-          okCount++;
-          remainder = Math.round((remainder - payRounded) * 100) / 100;
-        } catch (e: any) {
-          errs.push(`#${s.id.slice(0, 6)}: ${e?.message || 'erro'}`);
-        }
+      if (ordered.some(s => !freshPendingById.has(s.id) || cents(freshPendingById.get(s.id)!) !== cents(s.amount_pending))) {
+        throw new Error('Os saldos mudaram. Atualize as contas e confira o valor antes de receber.');
       }
-
-      if (okCount > 0 && errs.length === 0) {
-        toast.success(`Recebimento registrado em ${okCount} conta(s)`);
-        onOpenChange(false);
-        onSettled?.();
-      } else if (okCount > 0 && errs.length > 0) {
-        toast.warning(`Parcial: ${okCount} ok, ${errs.length} com erro`);
-        onSettled?.();
+      let remainingCents = cents(amount);
+      const entries = ordered.flatMap(s => {
+        const pay = Math.min(cents(s.amount_pending), remainingCents);
+        remainingCents -= pay;
+        return pay > 0 ? [{ saleId: s.id, amount: pay / 100 }] : [];
+      });
+      const result = await runPaymentSequence(entries, entry => invokeEdgeFunction('sales-settle-payment', {
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+        body: {
+          sale_id: entry.saleId, payments: [{ method, amount: entry.amount }],
+          paid_at: paidAt.toISOString(),
+          note: (note.trim() ? '[Lote] ' + note.trim() : '[Lote] Recebimento agrupado — ' + customerName).slice(0, 500),
+        },
+      }));
+      if (result.error) {
+        toast.error('Processamento interrompido. ' + result.completed + ' conta(s) confirmada(s). Confira os recebimentos antes de tentar novamente.');
       } else {
-        toast.error(errs[0] || 'Falha ao registrar recebimento');
+        toast.success('Recebimento de ' + fmt(amount) + ' registrado em ' + result.completed + ' conta(s)');
       }
+      onOpenChange(false);
+      onSettled?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível conferir os saldos. Tente novamente.');
+      onOpenChange(false);
+      onSettled?.();
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   };
@@ -175,7 +158,7 @@ export default function BatchSettlePaymentDialog({ customerName, sales, open, on
   }, [ordered, amount]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={next => { if (!submitLock.current) onOpenChange(next); }}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Lançar pagamento — {customerName}</DialogTitle>
@@ -214,7 +197,7 @@ export default function BatchSettlePaymentDialog({ customerName, sales, open, on
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar mode="single" selected={paidAt} onSelect={d => d && setPaidAt(d)} initialFocus className={cn('p-3 pointer-events-auto')} />
+                  <Calendar mode="single" selected={paidAt} onSelect={d => d && setPaidAt(d)} disabled={{ after: new Date() }} initialFocus className={cn('p-3 pointer-events-auto')} />
                 </PopoverContent>
               </Popover>
             </div>
