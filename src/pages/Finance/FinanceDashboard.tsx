@@ -58,7 +58,7 @@ export default function FinanceDashboard() {
     const { data: d, error } = await supabase.rpc("get_executive_finance_dashboard", { p_store_id: storeId });
     setLoading(false);
     if (error) { toast({ title: "Erro ao carregar dashboard", variant: "destructive" }); return; }
-    setData(d as Dashboard);
+    setData(d as unknown as Dashboard);
   }, [storeId]);
 
   useEffect(() => { load(); }, [load]);

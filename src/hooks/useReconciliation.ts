@@ -1,24 +1,9 @@
-﻿import { useEffect, useState } from "react";
+import type { Database } from "@/integrations/supabase/types";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
-export interface PendingReconciliation {
-  id: string;
-  bank_transaction_id: string;
-  transaction_date: string;
-  transaction_amount: number;
-  transaction_description: string | null;
-  bank_name: string;
-  suggested_sale_id: string | null;
-  sale_number: string | null;
-  sale_amount: number | null;
-  sale_date: string | null;
-  customer_name: string | null;
-  confidence_score: number;
-  match_type: string;
-  amount_difference: number | null;
-  date_difference_days: number | null;
-}
+export type PendingReconciliation = Database['public']['Functions']['get_pending_reconciliations']['Returns'][number];
 
 export function useReconciliation() {
   const { profile } = useAuth();

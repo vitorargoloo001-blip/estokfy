@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -57,6 +57,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const saving = useRef(false);
   const [origSale, setOrigSale] = useState<any | null>(null);
   const [origItems, setOrigItems] = useState<ItemRow[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -80,7 +81,10 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
 
   useEffect(() => {
     if (!open || !saleId || !profile) return;
+    let cancelled = false;
     setLoading(true);
+    setOrigSale(null);
+    setItems([]);
     setReason('');
     setShowConfirm(false);
     setAllowNegative(false);
@@ -116,6 +120,9 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
       supabase.from('customers').select('id, name').eq('store_id', profile.store_id).order('name'),
       loadAllProducts(),
     ]).then(([s, si, pm, cs, prAll]) => {
+      if (cancelled) return;
+      for (const result of [s, si, pm, cs]) { if (result.error) throw result.error; }
+      if (!s.data) throw new Error('Venda não encontrada');
       const sale = s.data as any;
       setOrigSale(sale);
       const oItems: ItemRow[] = (si.data || []).map((r: any) => ({
@@ -145,10 +152,12 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
       }
       setLoading(false);
     }).catch((err) => {
+      if (cancelled) return;
       console.error('[EditSaleDialog] load error', err);
       toast.error('Erro ao carregar a venda: ' + (err?.message || 'desconhecido'));
       setLoading(false);
     });
+    return () => { cancelled = true; };
   }, [open, saleId, profile]);
 
   const subtotal = useMemo(() => items.reduce((s, i) => s + (Number(i.unit_price) || 0) * (Number(i.qty) || 0), 0), [items]);
@@ -209,7 +218,11 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
   };
 
   const handleSave = async () => {
-    if (!saleId) return;
+    if (!saleId || saving.current || !origSale) return;
+    const validationError = validate();
+    if (validationError) { toast.error(validationError); return; }
+    if (willRevertPayment && !confirmRevert) return;
+    saving.current = true;
     setSubmitting(true);
     try {
       const { data, error } = await supabase.rpc('edit_sale_atomic', {
@@ -228,7 +241,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
           unit_price: Number(i.unit_price),
         })) as any,
         p_allow_negative_stock: allowNegative,
-        p_confirm_revert_payment: confirmRevert || !willRevertPayment,
+        p_confirm_revert_payment: willRevertPayment && confirmRevert,
       });
       if (error) throw error;
       const res = data as any;
@@ -241,8 +254,10 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
     } catch (err: any) {
       const msg = err?.message || 'Erro ao salvar edição';
       if (msg.includes('CONFIRM_REVERT_PAYMENT_REQUIRED')) {
-        toast.error('Confirme o estorno do pagamento para prosseguir');
+        toast.error('Esta venda já foi quitada. Feche e reabra a edição para conferir o pagamento atual. Nenhum pagamento foi estornado.');
         setRevertConfirmText('');
+      } else if (msg.includes('TOTAL_BELOW_RECEIVED')) {
+        toast.error('O novo total é menor que o valor já recebido. Estorne o excedente nos detalhes da venda antes de editar.');
       } else if (msg.includes('metodo_pagamento_invalido_para_quitacao')) {
         toast.error('Selecione uma forma de pagamento real (PIX, dinheiro, cartão...) antes de marcar a venda como paga.');
       } else if (msg.includes('Estoque insuficiente')) {
@@ -251,6 +266,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
         toast.error(msg);
       }
     } finally {
+      saving.current = false;
       setSubmitting(false);
     }
   };
@@ -466,7 +482,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
                   )}
                 </div>
                 <div className="space-y-1">
-                  <Label>Forma</Label>
+                  <Label>Forma para novos recebimentos</Label>
                   <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                     <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                     <SelectContent>{METHODS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
@@ -474,7 +490,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
                 </div>
               </div>
               {willRevertPayment && (
-                <p className="text-xs text-amber-700 dark:text-amber-400">⚠ Isso vai estornar o pagamento já recebido desta venda ({fmt(Number(origSale?.amount_paid) || 0)}) e marcá-la como não paga — exige confirmação na próxima tela. Para corrigir só a forma de pagamento ou o valor, não é preciso mudar o status. Para devolver parte do dinheiro, use "Estornar" na tela de detalhes da venda.</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400">⚠ Isso vai estornar o pagamento já recebido desta venda ({fmt(Number(origSale?.amount_paid) || 0)}) e marcá-la como não paga — exige confirmação na próxima tela. Os recebimentos anteriores são preservados; a forma escolhida vale para valores adicionais. Para devolver parte do dinheiro, use "Estornar" na tela de detalhes da venda.</p>
               )}
             </section>
 
@@ -528,7 +544,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
 
             <div className="flex gap-2 sticky bottom-0 bg-background pt-3 border-t">
               <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Cancelar</Button>
-              <Button className="flex-1" onClick={openConfirm}>Revisar e confirmar</Button>
+              <Button className="flex-1" onClick={openConfirm} disabled={!origSale}>Revisar e confirmar</Button>
             </div>
           </div>
         )}

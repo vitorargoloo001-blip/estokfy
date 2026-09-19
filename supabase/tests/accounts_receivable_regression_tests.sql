@@ -385,6 +385,56 @@ BEGIN
   -- RESULTADO FINAL
   -- ────────────────────────────────────────────────────────────
   RAISE NOTICE '';
+
+  -- Regression: stale editor and NULL confirmation must not reopen a paid sale.
+  v_tests := v_tests + 1;
+  BEGIN
+    PERFORM public.edit_sale_atomic(v_sale3, 'stale editor', v_customer, now(), 0, 0, null, 'pix', 'pending',
+      jsonb_build_array(jsonb_build_object('product_id',v_product,'qty',1,'unit_price',50)),false,null);
+    RAISE EXCEPTION 'Expected confirmation rejection';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'CONFIRM_REVERT_PAYMENT_REQUIRED%' THEN RAISE; END IF;
+  END;
+  IF (SELECT amount_paid <> 50 OR amount_pending <> 0 FROM sales WHERE id=v_sale3) THEN
+    RAISE EXCEPTION 'Stale edit changed payment';
+  END IF;
+
+  -- Regression: multiple partial receipts survive a routine edit with their IDs/methods/amounts intact.
+  PERFORM public.settle_sale_payment(v_sale2, '[{"method":"pix","amount":120}]'::jsonb);
+  v_tests := v_tests + 1;
+  v_items := (SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id) FROM payments p WHERE sale_id=v_sale2);
+  PERFORM public.edit_sale_atomic(v_sale2, 'routine split payment edit', v_customer, now(), 0, 0, 'nota', 'cash', 'paid',
+    jsonb_build_array(jsonb_build_object('product_id',v_product,'qty',4,'unit_price',50)),false,false);
+  IF v_items IS DISTINCT FROM (SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id) FROM payments p WHERE sale_id=v_sale2) THEN
+    RAISE EXCEPTION 'Routine edit rewrote individual payments';
+  END IF;
+  IF (SELECT sum(amount) FROM payment_allocations WHERE sale_id=v_sale2) <> 200 THEN
+    RAISE EXCEPTION 'Allocations not preserved';
+  END IF;
+  IF EXISTS (SELECT 1 FROM payments p JOIN payment_allocations a ON a.payment_id=p.id WHERE p.sale_id=v_sale2 GROUP BY p.id,p.amount HAVING sum(a.amount)>p.amount) THEN
+    RAISE EXCEPTION 'Allocation exceeds individual receipt';
+  END IF;
+
+  -- Regression: lowering total must not silently discard receipts.
+  v_tests := v_tests + 1;
+  BEGIN
+    PERFORM public.edit_sale_atomic(v_sale2, 'reduce below received', v_customer, now(), 10, 0, null, 'cash', 'paid',
+      jsonb_build_array(jsonb_build_object('product_id',v_product,'qty',4,'unit_price',50)),false,false);
+    RAISE EXCEPTION 'Expected explicit refund requirement';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'TOTAL_BELOW_RECEIVED%' THEN RAISE; END IF;
+  END;
+
+  -- Regression: raising a paid sale total creates only the additional receipt.
+  v_tests := v_tests + 1;
+  PERFORM public.edit_sale_atomic(v_sale2, 'increase paid sale total', v_customer, now(), 0, 10, null, 'pix', 'paid',
+    jsonb_build_array(jsonb_build_object('product_id',v_product,'qty',4,'unit_price',50)),false,false);
+  IF (SELECT sum(amount) FROM payments WHERE sale_id=v_sale2 AND method<>'pending') <> 210 THEN
+    RAISE EXCEPTION 'Additional payment total wrong';
+  END IF;
+  IF (SELECT count(*) FROM payments WHERE sale_id=v_sale2 AND method<>'pending') <> 3 THEN
+    RAISE EXCEPTION 'Original split receipts lost';
+  END IF;
   RAISE NOTICE '=== RESULTADO: % testes, % falha(s) ===', v_tests, v_errors;
   IF v_errors = 0 THEN
     RAISE NOTICE '✅ TODOS OS TESTES PASSARAM — venda paga não reabre sem ação explícita';

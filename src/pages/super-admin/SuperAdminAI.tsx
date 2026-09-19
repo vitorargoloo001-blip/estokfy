@@ -32,7 +32,7 @@ export default function SuperAdminAI() {
       toast({ title: "Acesso negado ou erro", description: error.message, variant: "destructive" });
       return;
     }
-    setData(d as Overview);
+    setData(d as unknown as Overview);
   }
 
   useEffect(() => { load(); }, []);

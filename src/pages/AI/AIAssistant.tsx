@@ -67,17 +67,7 @@ export default function AIAssistant() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Role gate
-  if (!["owner", "admin", "manager"].includes(role)) {
-    return (
-      <div className="flex items-center justify-center h-full p-8">
-        <Card className="max-w-sm p-6 text-center">
-          <BrainCircuit className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-          <p className="font-medium">Acesso restrito</p>
-          <p className="text-sm text-muted-foreground mt-1">O Copiloto IA está disponível para proprietários, administradores e gerentes.</p>
-        </Card>
-      </div>
-    );
-  }
+
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
@@ -124,6 +114,18 @@ export default function AIAssistant() {
   }
 
   const cleared = () => setMessages([]);
+
+  if (!["owner", "admin", "manager"].includes(role)) {
+    return (
+      <div className="flex items-center justify-center h-full p-8">
+        <Card className="max-w-sm p-6 text-center">
+          <BrainCircuit className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
+          <p className="font-medium">Acesso restrito</p>
+          <p className="text-sm text-muted-foreground mt-1">O Copiloto IA está disponível para proprietários, administradores e gerentes.</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-4rem)] p-4 gap-4">

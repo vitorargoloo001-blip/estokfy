@@ -164,11 +164,11 @@ export default function ConnectReports() {
       ]);
 
       if (reportRes.error) throw reportRes.error;
-      const d = reportRes.data as { summary: ReportSummary; transactions: ReportTransaction[] };
+      const d = reportRes.data as unknown as { summary: ReportSummary; transactions: ReportTransaction[] };
       setSummary(d.summary);
       setTransactions(d.transactions || []);
       setMethodBreakdown((methodRes.data as MethodBreakdown[]) || []);
-      setMonthComp(compRes.data as MonthComparison | null);
+      setMonthComp(compRes.data as unknown as MonthComparison | null);
     } catch (e) {
       toast.error("Erro ao carregar relatório: " + String(e));
     } finally {

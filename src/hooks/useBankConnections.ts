@@ -1,32 +1,11 @@
-﻿import { useEffect, useState } from "react";
+import type { Database } from "@/integrations/supabase/types";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
-export interface BankConnection {
-  id: string;
-  bank_name: string;
-  agency: string;
-  account_number: string;
-  account_type: "checking" | "savings" | "other";
-  status: "pending" | "connected" | "disconnected" | "error";
-  last_sync_at: string | null;
-  last_sync_status: string | null;
-  total_transactions: number;
-  is_active: boolean;
-  created_at: string;
-}
+export type BankConnection = Database['public']['Functions']['list_bank_connections']['Returns'][number];
 
-export interface SyncHistory {
-  id: string;
-  sync_started_at: string;
-  sync_completed_at: string | null;
-  status: "pending" | "success" | "partial" | "failed";
-  transactions_found: number;
-  transactions_imported: number;
-  transactions_skipped: number;
-  error_message: string | null;
-  duration_minutes: number | null;
-}
+export type SyncHistory = Database['public']['Functions']['get_sync_history']['Returns'][number];
 
 export function useBankConnections() {
   const { profile } = useAuth();

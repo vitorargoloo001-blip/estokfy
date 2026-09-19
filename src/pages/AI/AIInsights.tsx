@@ -37,6 +37,45 @@ export default function AIInsights() {
   const [generating, setGenerating] = useState(false);
   const [filter, setFilter] = useState<string>("active");
 
+
+
+  const load = useCallback(async () => {
+    if (!storeId || !["owner", "admin", "manager"].includes(role)) return;
+    setLoading(true);
+    const { data, error } = await supabase.rpc("get_ai_insights", {
+      p_store_id: storeId,
+      p_status: filter === "all" ? null : filter,
+      p_limit: 30,
+    });
+    setLoading(false);
+    if (error) { toast({ title: "Erro ao carregar insights", variant: "destructive" }); return; }
+    setInsights((data as Insight[]) ?? []);
+  }, [storeId, role, filter, toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function generate() {
+    if (!storeId || !["owner", "admin", "manager"].includes(role)) return;
+    setGenerating(true);
+    const { data, error } = await supabase.rpc("generate_ai_insights", { p_store_id: storeId });
+    setGenerating(false);
+    if (error) { toast({ title: "Erro ao gerar insights", variant: "destructive" }); return; }
+    const result = data as { insights_gerados: number } | null;
+    toast({ title: result?.insights_gerados ? `${result.insights_gerados} novo(s) insight(s) gerado(s)` : "Nenhum novo insight detectado" });
+    load();
+  }
+
+  async function resolve(id: string, action: "resolved" | "dismissed") {
+    if (!storeId || !["owner", "admin", "manager"].includes(role)) return;
+    await supabase.rpc("resolve_ai_insight", { p_insight_id: id, p_store_id: storeId, p_action: action });
+    toast({ title: action === "resolved" ? "Marcado como resolvido" : "Descartado" });
+    load();
+  }
+
+  const critCount    = insights.filter((i) => i.severity === "critico").length;
+  const atencaoCount = insights.filter((i) => i.severity === "atencao").length;
+  const opCount      = insights.filter((i) => i.severity === "oportunidade").length;
+
   if (!["owner", "admin", "manager"].includes(role)) {
     return (
       <div className="flex items-center justify-center h-full p-8">
@@ -48,43 +87,6 @@ export default function AIInsights() {
       </div>
     );
   }
-
-  const load = useCallback(async () => {
-    if (!storeId) return;
-    setLoading(true);
-    const { data, error } = await supabase.rpc("get_ai_insights", {
-      p_store_id: storeId,
-      p_status: filter === "all" ? null : filter,
-      p_limit: 30,
-    });
-    setLoading(false);
-    if (error) { toast({ title: "Erro ao carregar insights", variant: "destructive" }); return; }
-    setInsights((data as Insight[]) ?? []);
-  }, [storeId, filter]);
-
-  useEffect(() => { load(); }, [load]);
-
-  async function generate() {
-    if (!storeId) return;
-    setGenerating(true);
-    const { data, error } = await supabase.rpc("generate_ai_insights", { p_store_id: storeId });
-    setGenerating(false);
-    if (error) { toast({ title: "Erro ao gerar insights", variant: "destructive" }); return; }
-    const result = data as { insights_gerados: number } | null;
-    toast({ title: result?.insights_gerados ? `${result.insights_gerados} novo(s) insight(s) gerado(s)` : "Nenhum novo insight detectado" });
-    load();
-  }
-
-  async function resolve(id: string, action: "resolved" | "dismissed") {
-    if (!storeId) return;
-    await supabase.rpc("resolve_ai_insight", { p_insight_id: id, p_store_id: storeId, p_action: action });
-    toast({ title: action === "resolved" ? "Marcado como resolvido" : "Descartado" });
-    load();
-  }
-
-  const critCount    = insights.filter((i) => i.severity === "critico").length;
-  const atencaoCount = insights.filter((i) => i.severity === "atencao").length;
-  const opCount      = insights.filter((i) => i.severity === "oportunidade").length;
 
   return (
     <div className="space-y-6 p-6">

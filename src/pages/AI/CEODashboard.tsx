@@ -86,20 +86,8 @@ export default function CEODashboard() {
   const [inv, setInv] = useState<InvData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  if (!["owner", "admin", "manager"].includes(role)) {
-    return (
-      <div className="flex items-center justify-center h-full p-8">
-        <Card className="max-w-sm p-6 text-center">
-          <Target className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-          <p className="font-medium">Acesso restrito</p>
-          <p className="text-sm text-muted-foreground mt-1">Dashboard CEO disponível para proprietários, administradores e gerentes.</p>
-        </Card>
-      </div>
-    );
-  }
-
   async function load() {
-    if (!storeId) return;
+    if (!storeId || !["owner", "admin", "manager"].includes(role)) return;
     setLoading(true);
     const [h, f, s, i] = await Promise.all([
       supabase.rpc("ai_get_business_health_score", { p_store_id: storeId }),
@@ -111,13 +99,13 @@ export default function CEODashboard() {
     if (h.error || f.error || s.error || i.error) {
       toast({ title: "Erro ao carregar dados", variant: "destructive" }); return;
     }
-    setHealth(h.data as HealthData);
-    setFin(f.data as FinData);
-    setSal(s.data as SalData);
-    setInv(i.data as InvData);
+    setHealth(h.data as unknown as HealthData);
+    setFin(f.data as unknown as FinData);
+    setSal(s.data as unknown as SalData);
+    setInv(i.data as unknown as InvData);
   }
 
-  useEffect(() => { load(); }, [storeId]);
+  useEffect(() => { load(); }, [storeId, role]);
 
   const KPIS = fin && sal && inv ? [
     { label: "Saúde da empresa", value: `${health?.score ?? 0}/100`, sub: health?.grade, color: "text-violet-700", icon: BrainCircuit },
@@ -130,6 +118,18 @@ export default function CEODashboard() {
     { label: "Melhor vendedor", value: sal.top_vendedor !== "—" ? sal.top_vendedor : "—", sub: `Produto: ${sal.top_produto}`, color: "text-teal-700", icon: Users },
     { label: "Estoque parado", value: `${inv.parados_30d} itens`, sub: `Valor: ${fmtBRL(inv.valor_parado)}`, color: inv.valor_parado > 5000 ? "text-orange-700" : "text-slate-600", icon: Package },
   ] : [];
+
+  if (!["owner", "admin", "manager"].includes(role)) {
+    return (
+      <div className="flex items-center justify-center h-full p-8">
+        <Card className="max-w-sm p-6 text-center">
+          <Target className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
+          <p className="font-medium">Acesso restrito</p>
+          <p className="text-sm text-muted-foreground mt-1">Dashboard CEO disponível para proprietários, administradores e gerentes.</p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">

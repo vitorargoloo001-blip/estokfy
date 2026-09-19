@@ -105,10 +105,10 @@ export default function ConnectOverview() {
         supabase.rpc("get_ai_insights", { p_store_id: profile.store_id, p_include_dismissed: false, p_limit: 1 }),
       ]);
       if (kpiRes.error) throw kpiRes.error;
-      setKpis(kpiRes.data as DashboardKPIs);
+      setKpis(kpiRes.data as unknown as DashboardKPIs);
       setTrend((trendRes.data as TrendPoint[]) || []);
       setMethods((methodRes.data as MethodPoint[]) || []);
-      setMonthComp(compRes.data as MonthComparison | null);
+      setMonthComp(compRes.data as unknown as MonthComparison | null);
       setUnreadAlerts((alertRes.data as number) || 0);
       // ai insights count via second param (we only fetch 1 to check existence)
       // full count via separate small call

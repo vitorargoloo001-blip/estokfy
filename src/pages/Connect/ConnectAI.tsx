@@ -287,7 +287,7 @@ export default function ConnectAIPage() {
         p_store_id: profile.store_id, p_question_key: key,
       });
       if (error) throw error;
-      setLastAnswer(data as QueryAnswer);
+      setLastAnswer(data as unknown as QueryAnswer);
       // refresh history
       const { data: hist } = await supabase.rpc("get_ai_query_history",
         { p_store_id: profile.store_id, p_limit: 10 });
