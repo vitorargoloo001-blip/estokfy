@@ -32,4 +32,6 @@ Auditoria somente leitura encontrou 16 vendas com soma pago+pendente diferente d
 
 ## Publicação
 
-A ser preenchido após confirmar migrations, funções e frontend em produção.
+Em 19/09/2026, aplicadas as migrations 20260918000001, 20260919000001 e 20260919000002 no projeto aimasistzxghumuxxuaw. Funções sales-settle-payment (versão 3) e sales-settle-items-payment (versão 2) publicadas e ACTIVE. As duas suítes SQL passaram novamente após a aplicação, com rollback; supabase db lint --linked --level error retornou zero erros. Nesta retomada, 34 testes frontend, typecheck e build passaram.
+
+PR #1 integrado à main no commit 7c5264f35a85a3c34a82d4a96a1bae69918642da. Deploy de produção b24c6b44-6758-48ae-a3c9-046808a1d14d confirmado: check Cloudflare Pages concluído com success, domínio principal e URL do deploy retornando HTTP 200 e o mesmo arquivo novo /assets/index-DQS8LUrA.js. A indicação Active na listagem apareceu antes de o build terminar; por isso a validação incluiu o check e o conteúdo servido.
