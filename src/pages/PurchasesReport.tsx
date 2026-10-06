@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +13,9 @@ import { ShoppingBag, FileText, Download, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { todayStrBR, firstOfMonthStrBR, startOfDayBRtoUTCISO, endOfDayBRtoUTCISO } from '@/lib/dateBR';
+
+import { fetchAllReportRows, validReportRange } from '@/lib/reportQueries';
+import { purchaseTotal, financialDateLabel } from '@/lib/reportAuxiliary';
 
 interface MovementRow {
   id: string;
@@ -43,42 +46,47 @@ export default function PurchasesReport() {
   const [rows, setRows] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const requestSeq = useRef(0);
   const fetchData = useCallback(async () => {
     if (!storeId) return;
+    const request = ++requestSeq.current;
     setLoading(true);
+    setRows([]);
     try {
+      if (!validReportRange(from, to)) throw new Error("Informe um período válido.");
       const fromIso = startOfDayBRtoUTCISO(from);
       const toIso = endOfDayBRtoUTCISO(to);
 
+      const data = await fetchAllReportRows<MovementRow>(() => {
       let query = supabase
         .from('stock_movements')
-        .select('id, created_at, qty, unit_cost, total_amount, payment_method, receipt_path, reason, supplier_id, product_id, products(name), suppliers(name)')
+        .select('id, created_at, qty, unit_cost, total_amount, payment_method, receipt_path, reason, supplier_id, product_id, products(name, sku), suppliers(name)')
         .eq('store_id', storeId)
         .eq('movement_type', 'purchase_in')
         .gte('created_at', fromIso)
         .lte('created_at', toIso)
         .order('created_at', { ascending: false })
-        .limit(500);
+        .order('id');
 
       if (supplierFilter !== 'all') {
         if (supplierFilter === 'none') query = query.is('supplier_id', null);
         else query = query.eq('supplier_id', supplierFilter);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      setRows((data as unknown as MovementRow[]) || []);
+      return query;
+      });
+      if (request === requestSeq.current) setRows(data);
     } catch (e: any) {
-      toast.error(e.message || 'Erro ao carregar relatório');
+      if (request === requestSeq.current) toast.error(e.message || 'Erro ao carregar relatório');
     } finally {
-      setLoading(false);
+      if (request === requestSeq.current) setLoading(false);
     }
   }, [storeId, from, to, supplierFilter]);
 
   useEffect(() => {
     if (!storeId) return;
-    supabase.from('suppliers').select('id, name').eq('store_id', storeId).order('name')
-      .then(({ data }) => setSuppliers(data || []));
+    fetchAllReportRows(() => supabase.from('suppliers').select('id, name').eq('store_id', storeId).order('id'))
+      .then(setSuppliers).catch(() => toast.error('Não foi possível carregar os fornecedores.'));
   }, [storeId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -89,7 +97,7 @@ export default function PurchasesReport() {
     for (const r of rows) {
       const key = r.supplier_id || '__none__';
       const name = r.suppliers?.name || 'Sem fornecedor';
-      const total = Number(r.total_amount) || (Number(r.unit_cost || 0) * Number(r.qty || 0));
+      const total = purchaseTotal(r);
       const cur = map.get(key) || { name, qty: 0, total: 0, count: 0 };
       cur.qty += Number(r.qty) || 0;
       cur.total += total;
@@ -102,7 +110,7 @@ export default function PurchasesReport() {
   }, [rows]);
 
   const totals = useMemo(() => {
-    const totalValue = rows.reduce((s, r) => s + (Number(r.total_amount) || (Number(r.unit_cost || 0) * Number(r.qty || 0))), 0);
+    const totalValue = rows.reduce((s, r) => s + (purchaseTotal(r)), 0);
     const totalQty = rows.reduce((s, r) => s + Number(r.qty || 0), 0);
     return { totalValue, totalQty, count: rows.length };
   }, [rows]);
@@ -121,12 +129,12 @@ export default function PurchasesReport() {
   const exportCsv = () => {
     const header = ['Data', 'Produto', 'Fornecedor', 'Qty', 'Custo unit.', 'Total', 'Pagamento', 'Observação'];
     const lines = rows.map(r => [
-      new Date(r.created_at).toLocaleDateString('pt-BR'),
+      financialDateLabel(r.created_at),
       r.products?.name || '',
       r.suppliers?.name || 'Sem fornecedor',
       String(r.qty),
       Number(r.unit_cost || 0).toFixed(2),
-      Number(r.total_amount || (Number(r.unit_cost || 0) * Number(r.qty || 0))).toFixed(2),
+      purchaseTotal(r).toFixed(2),
       r.payment_method || '',
       (r.reason || '').replace(/[\r\n,;]+/g, ' '),
     ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
@@ -147,7 +155,7 @@ export default function PurchasesReport() {
           <ShoppingBag className="h-5 w-5 text-primary" />
           <h1 className="text-xl md:text-2xl font-bold">Relatório de Compras</h1>
         </div>
-        <Button variant="outline" size="sm" onClick={exportCsv} disabled={!rows.length}>
+        <Button variant="outline" size="sm" onClick={exportCsv} disabled={loading || !rows.length}>
           <Download className="h-4 w-4 mr-2" /> Exportar CSV
         </Button>
       </div>
@@ -240,10 +248,10 @@ export default function PurchasesReport() {
                 <div key={r.id} className="px-3 py-2.5 space-y-1">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium truncate">{r.products?.name || '-'}</p>
-                    <span className="text-sm font-semibold">{fmt(Number(r.total_amount) || (Number(r.unit_cost || 0) * Number(r.qty || 0)))}</span>
+                    <span className="text-sm font-semibold">{fmt(purchaseTotal(r))}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{new Date(r.created_at).toLocaleDateString('pt-BR')} · {r.qty} un.</span>
+                    <span>{financialDateLabel(r.created_at)} · {r.qty} un.</span>
                     <Badge variant="secondary" className="text-xs">{r.suppliers?.name || 'Sem fornecedor'}</Badge>
                   </div>
                   {r.receipt_path && (
@@ -269,12 +277,12 @@ export default function PurchasesReport() {
               <TableBody>
                 {rows.map(r => (
                   <TableRow key={r.id}>
-                    <TableCell className="text-sm">{new Date(r.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                    <TableCell className="text-sm">{financialDateLabel(r.created_at)}</TableCell>
                     <TableCell className="text-sm font-medium">{r.products?.name || '-'}</TableCell>
                     <TableCell className="text-sm">{r.suppliers?.name || <span className="text-muted-foreground">—</span>}</TableCell>
                     <TableCell className="text-center">{r.qty}</TableCell>
                     <TableCell className="text-right">{fmt(Number(r.unit_cost) || 0)}</TableCell>
-                    <TableCell className="text-right font-semibold">{fmt(Number(r.total_amount) || (Number(r.unit_cost || 0) * Number(r.qty || 0)))}</TableCell>
+                    <TableCell className="text-right font-semibold">{fmt(purchaseTotal(r))}</TableCell>
                     <TableCell className="text-sm capitalize">{r.payment_method || <span className="text-muted-foreground">—</span>}</TableCell>
                     <TableCell className="text-center">
                       {r.receipt_path ? (

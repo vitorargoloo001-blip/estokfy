@@ -17,20 +17,15 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import {
-  DollarSign, TrendingUp, TrendingDown, AlertTriangle, RotateCcw,
-  Download, Activity, RefreshCw, ShoppingCart, Package, Wallet,
-  Sparkles, Clock, ArrowUpRight, ArrowDownRight, Receipt, CreditCard,
-  Banknote, Smartphone, ArrowLeftRight, PackageX, CheckCircle2, Hourglass,
-  ChevronDown, Lightbulb, AlertCircle, GitCompareArrows, FileText,
-  Boxes, Trophy, History, FileDown, FileSearch,
-} from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, RotateCcw, Activity, RefreshCw, ShoppingCart, Wallet, Sparkles, Clock, ArrowUpRight, ArrowDownRight, Receipt, CreditCard, Banknote, Smartphone, ArrowLeftRight, PackageX, Hourglass, ChevronDown, Lightbulb, AlertCircle, GitCompareArrows, FileText, Boxes, Trophy, History, FileDown, FileSearch } from 'lucide-react';
 import EmployeeFilter from '@/components/EmployeeFilter';
 import AuditPeriodDialog from '@/components/AuditPeriodDialog';
 import { usePermissions } from '@/hooks/usePermissions';
 import { logger } from '@/lib/logger';
-import { todayStrBR, daysAgoStrBR, firstOfMonthStrBR } from '@/lib/dateBR';
+import { todayStrBR, daysAgoStrBR, firstOfMonthStrBR, isoToDayBR, TZ_BR } from '@/lib/dateBR';
 import { getMovementMeta, movementBadgeClass } from '@/lib/stockMovementLabels';
+import { addSalesReportTable, formatSoldItems, reportDateLabel, reportSaleDay, salePaymentLabel, type ReportSale } from '@/lib/reportSales';
+import { validReportRange } from '@/lib/reportQueries';
 // jsPDF (~166KB) é carregado apenas quando o usuário clica em "Baixar PDF"
 
 // ============= Types =============
@@ -53,7 +48,7 @@ interface SalesData {
   payment_methods_realized?: Record<string, { amount: number; count: number }>;
   top_products: { sku: string; name: string; qty: number; revenue: number; methods?: string[] }[];
   by_category?: { category: string; qty: number; revenue: number }[];
-  list: { id: string; time: string; customer: string; gross: number; discount: number; shipping: number; net: number; profit: number; payment_method: string | null; payment_status?: string; amount_paid?: number; amount_pending?: number; due_date?: string | null; notes?: string | null }[];
+  list: (ReportSale & { gross: number; discount: number; shipping: number; net: number; profit: number; payment_method: string | null; payment_status?: string; amount_paid?: number; amount_pending?: number; due_date?: string | null; notes?: string | null })[];
 }
 
 interface ReturnsData {
@@ -125,6 +120,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   outro: 'Outro',
   nao_informado: 'Não informado',
   return_offset: 'Abatimento por devolução',
+  credit: 'Crédito (sem entrada de caixa)',
 };
 
 const PAYMENT_METHOD_ICONS: Record<string, typeof CreditCard> = {
@@ -139,8 +135,8 @@ const PAYMENT_METHOD_ICONS: Record<string, typeof CreditCard> = {
 
 // ============= Helpers =============
 const fmt = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const fmtTime = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const fmtDateTime = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtTime = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: TZ_BR, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const fmtDateTime = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: TZ_BR, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const labelPM = (m: string) => PAYMENT_METHOD_LABELS[m] || m;
 
 const PM_BADGE_CLASSES: Record<string, string> = {
@@ -187,7 +183,6 @@ function parseAIText(text: string): { summary: string; alerts: string[]; suggest
   const result = { summary: '', alerts: [] as string[], suggestions: [] as string[] };
   if (!text) return result;
 
-  const lower = text.toLowerCase();
   // Heuristic split by common headings
   const alertKeywords = ['ponto', 'atenção', 'atencao', 'alerta', 'risco', 'problema'];
   const suggestKeywords = ['sugest', 'recomend', 'ação', 'acao', 'oportunidade', 'próximos passos', 'proximos passos'];
@@ -230,52 +225,11 @@ function getPreviousRange(from: string, to: string): { from: string; to: string 
 }
 
 // Variation% helper. Returns null when previous is 0 (avoid division by zero).
-function delta(current: number, previous: number | undefined | null): { pct: number; positive: boolean } | null {
-  if (previous == null || previous === 0) return null;
-  const pct = ((current - previous) / Math.abs(previous)) * 100;
-  return { pct, positive: pct >= 0 };
-}
 
 // Inline SVG sparkline. `series` is an array of numbers.
-function Sparkline({ series, color = 'currentColor', width = 90, height = 28 }: { series?: number[] | null; color?: string; width?: number; height?: number; }) {
-  const safe = Array.isArray(series)
-    ? series.map((v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0))
-    : [];
-  if (safe.length < 2) {
-    return <span className="text-[10px] text-muted-foreground">—</span>;
-  }
-  const min = Math.min(...safe);
-  const max = Math.max(...safe);
-  const range = max - min || 1;
-  const stepX = width / (safe.length - 1);
-  const points = safe.map((v, i) => {
-    const x = i * stepX;
-    const y = height - ((v - min) / range) * (height - 4) - 2;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const path = `M${points.join(' L')}`;
-  const area = `${path} L${width.toFixed(1)},${height} L0,${height} Z`;
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
-      <path d={area} fill={color} fillOpacity="0.12" />
-      <path d={path} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 // Small inline delta badge: green when positive, red when negative.
 // `invert` flips colors (used for expense/pending where decreasing is good).
-function DeltaBadge({ d, invert = false }: { d: { pct: number; positive: boolean } | null; invert?: boolean }) {
-  if (!d) return <span className="text-[10px] text-muted-foreground">—</span>;
-  const good = invert ? !d.positive : d.positive;
-  const Icon = d.positive ? ArrowUpRight : ArrowDownRight;
-  return (
-    <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums ${good ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-      <Icon className="h-3 w-3" />
-      {Math.abs(d.pct).toFixed(1)}%
-    </span>
-  );
-}
 
 // ============= Component =============
 export default function Reports() {
@@ -300,6 +254,11 @@ export default function Reports() {
   const [sellerId, setSellerId] = useState<string | null>(locationState?.sellerId ?? null);
   const [sellerName, setSellerName] = useState<string | null>(locationState?.sellerName ?? null);
   const [auditOpen, setAuditOpen] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const requestSeq = useRef(0);
+  const scopeRef = useRef('');
+  scopeRef.current = JSON.stringify([storeId, from, to, sellerId, compareEnabled]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -309,8 +268,14 @@ export default function Reports() {
   const sellerRef = useRef(sellerId); sellerRef.current = sellerId;
 
   const fetchReport = useCallback(async (silent = false) => {
-    if (!profile) return;
-    if (!silent) setLoading(true);
+    if (!storeId) return;
+    const requestId = ++requestSeq.current;
+    const scope = scopeRef.current;
+    if (!validReportRange(fromRef.current, toRef.current)) {
+      setData(null); setLoading(false); setReportError('Informe um período válido, com início anterior ou igual ao fim.'); return;
+    }
+    if (!silent) { setLoading(true); setData(null); }
+    setReportError(null);
     try {
       const params: Record<string, string> = { from: fromRef.current, to: toRef.current };
       if (compareRef.current) {
@@ -324,6 +289,7 @@ export default function Reports() {
         params,
         timeout: 30_000,
       });
+      if (requestId !== requestSeq.current || scope !== scopeRef.current) return;
       setData(result);
       setLastUpdate(new Date());
       if (silent) {
@@ -331,16 +297,27 @@ export default function Reports() {
         setTimeout(() => setPulse(false), 1200);
       }
     } catch (err: any) {
+      if (requestId !== requestSeq.current || scope !== scopeRef.current) return;
+      setReportError(err.message || 'Erro ao carregar relatório.');
       console.error('Erro ao carregar relatório:', err);
       if (!silent) toast.error(err.message || 'Erro ao carregar relatório.');
     } finally {
-      if (!silent) setLoading(false);
+      if (requestId === requestSeq.current && scope === scopeRef.current) setLoading(false);
     }
-  }, [profile]);
+  }, [storeId]);
+
+  const runExport = async (action: () => Promise<unknown>) => {
+    if (loading || exporting || reportError) return;
+    setExporting(true);
+    try { await action(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : 'Não foi possível exportar o relatório.'); }
+    finally { setExporting(false); }
+  };
 
   const loadSavedAnalysis = useCallback(async () => {
     if (!storeId) return;
-    const { data: rows, error } = await supabase
+    setSavedAnalysis(null);
+    let query = supabase
       .from('report_ai_analyses')
       .select('id, analysis_text, created_at, period_start, period_end, metadata')
       .eq('store_id', storeId)
@@ -348,6 +325,8 @@ export default function Reports() {
       .eq('period_end', to)
       .order('created_at', { ascending: false })
       .limit(1);
+    query = sellerId ? query.eq('metadata->>seller_id', sellerId) : query.is('metadata->>seller_id', null);
+    const { data: rows, error } = await query;
     if (error) {
       logger.error('loadSavedAnalysis', error);
       return;
@@ -363,7 +342,7 @@ export default function Reports() {
       period_end: row.period_end,
       structured: meta?.structured && typeof meta.structured === 'object' ? meta.structured : null,
     });
-  }, [storeId, from, to]);
+  }, [storeId, from, to, sellerId]);
 
   useEffect(() => {
     if (preset === 'custom') return;
@@ -412,7 +391,7 @@ export default function Reports() {
     try {
       const res = await invokeEdgeFunction<{ analysis: string; structured?: AIStructured; id: string; created_at: string }>('reports-ai-analysis', {
         method: 'POST',
-        body: { ...data },
+        body: { period: data.period, seller_id: sellerId },
         timeout: 30_000,
       });
       setSavedAnalysis({
@@ -472,7 +451,7 @@ export default function Reports() {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
     doc.text(title, 40, 105);
     doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
-    if (data) doc.text(`Período: ${data.period.from}  →  ${data.period.to}`, 40, 122);
+    if (data) doc.text(`Período: ${reportDateLabel(data.period.from)} a ${reportDateLabel(data.period.to)}`, 40, 122);
     // Linha separadora elegante
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
@@ -485,7 +464,7 @@ export default function Reports() {
   // ===== 1. Relatório Geral do Período (completo) =====
   const downloadPDF = async () => {
     if (!data) return;
-    const { doc, autoTable, pageW } = await buildDoc('Relatório Geral');
+    const { doc, autoTable } = await buildDoc('Relatório Geral');
     let y = 148;
 
     const section = (label: string) => {
@@ -505,65 +484,8 @@ export default function Reports() {
     if (data.sales.list.length) {
       section('Vendas realizadas');
 
-      // Agrupa por dia em America/Sao_Paulo
-      const tz = 'America/Sao_Paulo';
-      const dayKey = (iso: string) => {
-        // pt-BR returns dd/MM/yyyy → invert para yyyy-MM-dd ordenável
-        const [d, m, y] = new Date(iso).toLocaleDateString('pt-BR', { timeZone: tz }).split('/');
-        return `${y}-${m}-${d}`;
-      };
-      const dayLabel = (key: string) => {
-        const [y, m, d] = key.split('-');
-        return `${d}/${m}/${y}`;
-      };
-      const hourFmt = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', {
-        timeZone: tz, hour: '2-digit', minute: '2-digit',
-      });
-
-      const groups = new Map<string, typeof data.sales.list>();
-      for (const s of data.sales.list) {
-        const k = dayKey(s.time);
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k)!.push(s);
-      }
-      // dia DESC, hora ASC dentro do dia
-      const orderedKeys = Array.from(groups.keys()).sort((a, b) => b.localeCompare(a));
-
-      let printed = 0;
-      const MAX = 200;
-      for (const key of orderedKeys) {
-        if (printed >= MAX) break;
-        const dayRows = (groups.get(key) || [])
-          .slice()
-          .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-
-        if (y > 720) { doc.addPage(); y = 60; }
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(37, 99, 235);
-        doc.text(`Data: ${dayLabel(key)}`, 40, y);
-        doc.setTextColor(0); y += 4;
-
-        autoTable(doc, {
-          startY: y + 2, theme: 'striped',
-          head: [['Hora', 'Cliente', 'Pgto', 'Status', 'Líquido', 'Pendente', 'Obs.']],
-          body: dayRows.slice(0, MAX - printed).map(s => [
-            hourFmt(s.time),
-            s.customer,
-            s.payment_method ? labelPM(s.payment_method) : '—',
-            s.payment_status === 'paid' ? 'Pago' : s.payment_status === 'partial' ? 'Parcial' : s.payment_status === 'pending' ? 'Pendente' : '—',
-            fmt(s.net),
-            fmt(s.amount_pending || 0),
-            (s.notes || '').replace(/\s+/g, ' ').slice(0, 80),
-          ]),
-          headStyles: { fillColor: [37, 99, 235] }, styles: { fontSize: 9, overflow: 'linebreak' },
-          columnStyles: {
-            4: { halign: 'right' },
-            5: { halign: 'right' },
-            6: { cellWidth: 130, fontStyle: 'italic', textColor: [90, 90, 90] },
-          },
-        });
-        printed += dayRows.length;
-        afterTable();
-      }
+      addSalesReportTable(doc, autoTable, data.sales.list, y + 4);
+      afterTable();
     }
 
     // === 2. RESUMO POR TIPO DE PRODUTO VENDIDO ===
@@ -573,7 +495,7 @@ export default function Reports() {
       const totalCatQty = byCat.reduce((s, c) => s + (c.qty || 0), 0) || 1;
       autoTable(doc, {
         startY: y + 4, theme: 'striped',
-        head: [['Tipo/Categoria', 'Quantidade', '% do total', 'Receita']],
+        head: [['Tipo/Categoria', 'Quantidade', '% do total', 'Valor dos itens']],
         body: byCat.map(c => [
           c.category,
           `${c.qty} un`,
@@ -602,15 +524,27 @@ export default function Reports() {
       afterTable();
     }
 
-    // 3B removido: "Fechamento de caixa real (recebimentos no período)" — não exibir no PDF
-
+    section('Vendas e recebimentos no período');
+    autoTable(doc, {
+      startY: y + 4, theme: 'grid', head: [['Indicador', 'Valor']],
+      body: [
+        ['Vendido pela data da venda', fmt(data.summary.amount_sold ?? data.sales.net)],
+        ['Pendente das vendas do período (saldo atual)', fmt(data.summary.amount_pending ?? 0)],
+        ['Recebido de vendas feitas no período', fmt(data.summary.amount_received_from_period_sales ?? 0)],
+        ['Recebido de vendas anteriores', fmt(data.summary.amount_received_from_old_sales ?? 0)],
+        ['Outros pagamentos recebidos', fmt(data.summary.amount_received_from_other ?? 0)],
+        ['Total de pagamentos recebidos no período', fmt(data.summary.amount_received ?? 0)],
+      ],
+      headStyles: { fillColor: [37, 99, 235] }, styles: { fontSize: 9 }, columnStyles: { 1: { halign: 'right' } },
+    });
+    afterTable();
 
     // === 4. PRODUTOS MAIS VENDIDOS ===
     if (data.sales.top_products.length) {
       section('Produtos mais vendidos');
       autoTable(doc, {
         startY: y + 4, theme: 'striped',
-        head: [['#', 'Produto', 'Qtd', 'Pgto', 'Receita']],
+        head: [['#', 'Produto', 'Qtd', 'Pgto', 'Valor dos itens']],
         body: data.sales.top_products.map((p, i) => [
           String(i + 1),
           p.name || 'Produto não identificado',
@@ -667,10 +601,10 @@ export default function Reports() {
     const expCats = Object.entries(data.finance.expense_by_category);
     const incCats = Object.entries(data.finance.income_by_category);
     if (expCats.length || incCats.length) {
-      section('Financeiro por categoria');
+      section('Movimentação de caixa por categoria');
       autoTable(doc, {
         startY: y + 4, theme: 'grid',
-        head: [['Tipo', 'Categoria', 'Valor']],
+        head: [['Tipo (data do recebimento ou despesa)', 'Categoria', 'Valor']],
         body: [
           ...incCats.map(([c, v]) => ['Receita', c, fmt(v)]),
           ...expCats.map(([c, v]) => ['Despesa', c, fmt(v)]),
@@ -690,19 +624,19 @@ export default function Reports() {
     if (!data) return;
     const { doc, autoTable } = await buildDoc('Relatório Financeiro');
     autoTable(doc, {
-      startY: 130, theme: 'grid',
+      startY: 145, theme: 'grid',
       head: [['Indicador', 'Valor']],
       body: [
         ['Receitas (caixa)', fmt(data.finance.income_total)],
         ['Despesas (caixa)', fmt(data.finance.expense_total)],
         ['Saldo', fmt(data.finance.balance)],
-        ['Recebido de vendas', fmt(data.summary.amount_received ?? 0)],
+        ['Pagamentos recebidos no período', fmt(data.summary.amount_received ?? 0)],
         ['A receber', fmt(data.summary.amount_pending ?? 0)],
         ['Vencido', fmt(data.summary.overdue_amount ?? 0)],
       ],
       headStyles: { fillColor: [37, 99, 235] },
     });
-    let y = (doc as any).lastAutoTable.finalY + 18;
+    const y = (doc as any).lastAutoTable.finalY + 18;
     if (data.finance.entries.length) {
       doc.setFont('helvetica', 'bold'); doc.text('Lançamentos', 40, y);
       autoTable(doc, {
@@ -723,7 +657,7 @@ export default function Reports() {
     if (!data) return;
     const { doc, autoTable } = await buildDoc('Relatório de Vendas');
     autoTable(doc, {
-      startY: 130, theme: 'grid',
+      startY: 145, theme: 'grid',
       head: [['Indicador', 'Valor']],
       body: [
         ['Vendas', String(data.sales.count)],
@@ -732,26 +666,15 @@ export default function Reports() {
         ['Descontos', fmt(data.sales.discounts)],
         ['Frete', fmt(data.sales.shipping)],
         ['Líquido', fmt(data.sales.net)],
-        ['Recebido', fmt(data.sales.amount_received ?? 0)],
+        ['Recebido no período (inclui vendas anteriores)', fmt(data.sales.amount_received ?? 0)],
         ['Pendente', fmt(data.sales.amount_pending ?? 0)],
       ],
       headStyles: { fillColor: [37, 99, 235] },
     });
-    let y = (doc as any).lastAutoTable.finalY + 18;
+    const y = (doc as any).lastAutoTable.finalY + 18;
     if (data.sales.list.length) {
       doc.setFont('helvetica', 'bold'); doc.text('Vendas do período', 40, y);
-      autoTable(doc, {
-        startY: y + 6, theme: 'striped',
-        head: [['Data', 'Cliente', 'Pgto', 'Status', 'Líquido', 'Lucro', 'Obs.']],
-        body: data.sales.list.map(s => [
-          fmtTime(s.time), s.customer, s.payment_method ? labelPM(s.payment_method) : '—',
-          s.payment_status === 'paid' ? 'Pago' : s.payment_status === 'partial' ? 'Parcial' : s.payment_status === 'pending' ? 'Pendente' : '—',
-          fmt(s.net), fmt(s.profit),
-          (s.notes || '').replace(/\s+/g, ' ').slice(0, 80),
-        ]),
-        headStyles: { fillColor: [37, 99, 235] }, styles: { fontSize: 9, overflow: 'linebreak' },
-        columnStyles: { 6: { cellWidth: 110, fontStyle: 'italic', textColor: [90, 90, 90] } },
-      });
+      addSalesReportTable(doc, autoTable, data.sales.list, y + 6);
     }
     doc.save(`relatorio-vendas_${data.period.from}_${data.period.to}.pdf`);
   };
@@ -761,8 +684,8 @@ export default function Reports() {
     if (!data) return;
     const { doc, autoTable } = await buildDoc('Produtos Mais Vendidos');
     autoTable(doc, {
-      startY: 130, theme: 'striped',
-      head: [['#', 'Produto', 'Qtd', 'Pgto', 'Receita']],
+      startY: 145, theme: 'striped',
+      head: [['#', 'Produto', 'Qtd', 'Pgto', 'Valor dos itens']],
       body: data.sales.top_products.map((p, i) => [String(i + 1), p.name, String(p.qty), summarizeMethods(p.methods).text, fmt(p.revenue)]),
       headStyles: { fillColor: [37, 99, 235] }, styles: { fontSize: 9 },
       columnStyles: { 2: { halign: 'center' }, 3: { halign: 'center' }, 4: { halign: 'right' } },
@@ -775,12 +698,12 @@ export default function Reports() {
     if (!data) return;
     const { doc, autoTable } = await buildDoc('Movimentações de Estoque');
     autoTable(doc, {
-      startY: 130, theme: 'grid',
+      startY: 145, theme: 'grid',
       head: [['Tipo da movimentação', 'Movimentações', 'Quantidade', 'Valor movimentado']],
       body: Object.entries(data.stock.by_type).map(([t, v]) => [getMovementMeta(t).label, String(v.count), String(v.qty), fmt(v.value)]),
       headStyles: { fillColor: [37, 99, 235] }, styles: { fontSize: 9 },
     });
-    let y = (doc as any).lastAutoTable.finalY + 18;
+    const y = (doc as any).lastAutoTable.finalY + 18;
     if (data.stock.purchases.length) {
       doc.setFont('helvetica', 'bold'); doc.text('Compras de estoque', 40, y);
       autoTable(doc, {
@@ -803,7 +726,7 @@ export default function Reports() {
     if (!data) return [] as { day: string; events: TimelineEvent[] }[];
     const groups: Record<string, TimelineEvent[]> = {};
     for (const ev of data.timeline) {
-      const day = ev.time.slice(0, 10);
+      const day = isoToDayBR(ev.time);
       (groups[day] ||= []).push(ev);
     }
     return Object.entries(groups)
@@ -811,15 +734,6 @@ export default function Reports() {
       .map(([day, events]) => ({ day, events }));
   }, [data]);
 
-  // BLOCO B: Recebimentos no caixa (por paid_at)
-  const paymentMethodsBar = useMemo(() => {
-    if (!data) return [];
-    const entries = Object.entries(data.sales.payment_methods)
-      .map(([m, v]) => ({ method: m, ...v }))
-      .sort((a, b) => b.amount - a.amount);
-    const total = entries.reduce((s, e) => s + e.amount, 0) || 1;
-    return entries.map(e => ({ ...e, pct: (e.amount / total) * 100 }));
-  }, [data]);
 
   // BLOCO A: Formas de pagamento das vendas realizadas (por sale_date)
   const paymentMethodsRealizedBar = useMemo(() => {
@@ -845,21 +759,7 @@ export default function Reports() {
     return parseAIText(savedAnalysis?.analysis_text || '');
   }, [savedAnalysis]);
 
-  // Sparkline series (last 7 days inside the period). Robust to null/undefined/missing keys.
-  const sparkSeries = useMemo(() => {
-    const points = Array.isArray(data?.daily_series) ? data!.daily_series! : [];
-    const last = points.slice(-7);
-    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-    return {
-      sales: last.map((p) => num(p?.sales)),
-      profit: last.map((p) => num(p?.profit)),
-      expense: last.map((p) => num(p?.expense)),
-      pending: last.map((p) => num(p?.pending)),
-    };
-  }, [data]);
 
-  // Comparison deltas (only when previous period is loaded)
-  const cmp = data?.previous;
 
   const lastUpdateLabel = lastUpdate
     ? lastUpdate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -890,16 +790,18 @@ export default function Reports() {
   const salesByShift = useMemo(() => {
     if (!data) return [] as { shift: string; list: typeof data.sales.list }[];
     const tz = 'America/Sao_Paulo';
-    const groups: Record<string, typeof data.sales.list> = { 'Manhã': [], 'Tarde': [], 'Noite': [] };
+    const groups: Record<string, typeof data.sales.list> = {};
     for (const s of data.sales.list) {
       const hourStr = new Date(s.time).toLocaleTimeString('pt-BR', { timeZone: tz, hour: '2-digit', hour12: false });
       const h = parseInt(hourStr, 10);
       const shift = h < 12 ? 'Manhã' : h < 18 ? 'Tarde' : 'Noite';
-      groups[shift].push(s);
+      const key = `${reportSaleDay(s)}|${shift}`;
+      (groups[key] ||= []).push(s);
     }
     return Object.entries(groups)
       .filter(([, list]) => list.length > 0)
-      .map(([shift, list]) => ({ shift, list: list.slice().sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()) }));
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([key, list]) => ({ shift: `${reportDateLabel(key.split("|")[0])} · ${key.split("|")[1]}`, list: list.slice().sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()) }));
   }, [data]);
 
   const uniqueCustomers = useMemo(() => {
@@ -949,7 +851,7 @@ export default function Reports() {
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" className="gap-1.5" disabled={!data}>
+                <Button size="sm" className="gap-1.5" disabled={!data || loading || exporting || !!reportError}>
                   <FileDown className="h-4 w-4" />
                   Relatórios
                   <ChevronDown className="h-3.5 w-3.5 opacity-70" />
@@ -957,7 +859,7 @@ export default function Reports() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-64">
                 <DropdownMenuLabel className="text-xs">Exportar PDF</DropdownMenuLabel>
-                <DropdownMenuItem onClick={downloadPDF} disabled={!data} className="gap-2">
+                <DropdownMenuItem onClick={() => runExport(downloadPDF)} disabled={!data || loading || exporting || !!reportError} className="gap-2">
                   <FileText className="h-4 w-4 text-primary" />
                   <div className="flex-1">
                     <div className="text-sm font-medium">Relatório geral do período</div>
@@ -965,16 +867,16 @@ export default function Reports() {
                   </div>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={exportFinancePdf} disabled={!data} className="gap-2">
+                <DropdownMenuItem onClick={() => runExport(exportFinancePdf)} disabled={!data || loading || exporting || !!reportError} className="gap-2">
                   <Wallet className="h-4 w-4" /> Relatório financeiro
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={exportSalesPdf} disabled={!data} className="gap-2">
+                <DropdownMenuItem onClick={() => runExport(exportSalesPdf)} disabled={!data || loading || exporting || !!reportError} className="gap-2">
                   <ShoppingCart className="h-4 w-4" /> Relatório de vendas
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={exportTopProductsPdf} disabled={!data} className="gap-2">
+                <DropdownMenuItem onClick={() => runExport(exportTopProductsPdf)} disabled={!data || loading || exporting || !!reportError} className="gap-2">
                   <Trophy className="h-4 w-4" /> Produtos mais vendidos
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={exportMovementsPdf} disabled={!data} className="gap-2">
+                <DropdownMenuItem onClick={() => runExport(exportMovementsPdf)} disabled={!data || loading || exporting || !!reportError} className="gap-2">
                   <History className="h-4 w-4" /> Movimentações de estoque
                 </DropdownMenuItem>
                 {storeId && (
@@ -982,17 +884,17 @@ export default function Reports() {
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel className="text-xs">Alertas (loja toda)</DropdownMenuLabel>
                     <DropdownMenuItem
-                      onClick={async () => { const { exportLowStockPdf } = await import('@/lib/reportPdf'); await exportLowStockPdf(storeId); }}
+                      onClick={async () => { await runExport(async () => { const { exportLowStockPdf } = await import('@/lib/reportPdf'); await exportLowStockPdf(storeId); }); }}
                       className="gap-2">
                       <Boxes className="h-4 w-4 text-amber-600" /> Estoque baixo
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={async () => { const { exportLowMarginPdf } = await import('@/lib/reportPdf'); await exportLowMarginPdf(storeId); }}
+                      onClick={async () => { await runExport(async () => { const { exportLowMarginPdf } = await import('@/lib/reportPdf'); await exportLowMarginPdf(storeId); }); }}
                       className="gap-2">
                       <TrendingDown className="h-4 w-4 text-amber-600" /> Margem baixa
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={async () => { const { exportOverduePdf } = await import('@/lib/reportPdf'); await exportOverduePdf(storeId); }}
+                      onClick={async () => { await runExport(async () => { const { exportOverduePdf } = await import('@/lib/reportPdf'); await exportOverduePdf(storeId); }); }}
                       className="gap-2">
                       <AlertCircle className="h-4 w-4 text-rose-600" /> Contas vencidas
                     </DropdownMenuItem>
@@ -1070,6 +972,7 @@ export default function Reports() {
         </div>
       )}
 
+      {reportError && <p role="alert" className="text-sm text-destructive">{reportError} Atualize os dados antes de exportar.</p>}
       {loading && !data && <p className="text-muted-foreground">Carregando relatório...</p>}
 
       {data && (
@@ -1080,8 +983,8 @@ export default function Reports() {
             <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">Indicadores</h2>
             <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
               {[
-                { label: 'Vendido no período', value: fmt(data.summary.amount_sold ?? data.sales.net), sub: `${data.summary.sales_count || 0} venda(s) (sale_date)`, icon: ShoppingCart, tone: 'text-primary', bg: 'bg-primary/10' },
-                { label: 'Recebido no caixa', value: fmt(data.summary.amount_received ?? 0), sub: 'por paid_at', icon: DollarSign, tone: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10' },
+                { label: 'Vendido no período', value: fmt(data.summary.amount_sold ?? data.sales.net), sub: `${data.summary.sales_count || 0} venda(s) pela data da venda`, icon: ShoppingCart, tone: 'text-primary', bg: 'bg-primary/10' },
+                { label: 'Recebido no caixa', value: fmt(data.summary.amount_received ?? 0), sub: 'pela data do pagamento', icon: DollarSign, tone: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10' },
                 { label: 'Pendente', value: fmt(data.summary.amount_pending ?? 0), sub: `${data.summary.pending_sales_count ?? 0} venda(s) em aberto`, icon: Hourglass, tone: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10' },
                 { label: 'Lucro bruto', value: fmt(data.summary.gross_profit ?? 0), sub: 'sobre vendas do período', icon: TrendingUp, tone: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10' },
                 { label: 'Devoluções', value: fmt(data.summary.refund_total ?? 0), sub: `${data.summary.returns_count ?? 0} item(ns)`, icon: RotateCcw, tone: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10' },
@@ -1155,11 +1058,11 @@ export default function Reports() {
 
           {/* ============= 2. CAIXA LÍQUIDO REAL (apenas tela — não vai para o PDF) ============= */}
           {(() => {
-            const recebido = Number(data.summary.amount_received ?? 0);
+            const recebido = Number(data.finance.income_total ?? 0);
             const despesas = Number(data.summary.expense_total ?? 0);
             const devolucoes = Number(data.summary.refund_total ?? 0);
             const compras = Number(data.summary.purchase_total ?? 0);
-            const liquido = Number(data.summary.net_real_total ?? (recebido - despesas - devolucoes - compras));
+            const liquido = Number(data.summary.net_real_total ?? data.finance.balance);
             const positive = liquido >= 0;
             return (
               <section className="space-y-3" data-report-screen-only>
@@ -1183,12 +1086,12 @@ export default function Reports() {
                           <div className="font-semibold tabular-nums text-rose-600 dark:text-rose-400">− {fmt(despesas)}</div>
                         </div>
                         <div className="rounded-lg border border-border bg-card/50 p-3">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Devoluções</div>
-                          <div className="font-semibold tabular-nums text-rose-600 dark:text-rose-400">− {fmt(devolucoes)}</div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Valor devolvido (informativo)</div>
+                          <div className="font-semibold tabular-nums">{fmt(devolucoes)}</div>
                         </div>
                         <div className="rounded-lg border border-border bg-card/50 p-3">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Compras</div>
-                          <div className="font-semibold tabular-nums text-rose-600 dark:text-rose-400">− {fmt(compras)}</div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Compras (incluídas nas despesas)</div>
+                          <div className="font-semibold tabular-nums">{fmt(compras)}</div>
                         </div>
                       </div>
                     </div>
@@ -1215,17 +1118,18 @@ export default function Reports() {
                           <div className="flex-1 h-px bg-border" />
                         </div>
                         <div className="md:hidden space-y-2">
-                          {list.slice(0, 30).map(s => (
+                          {list.map(s => (
                             <div key={s.id} className="rounded-lg border border-border bg-card p-3 space-y-2">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">
                                   <div className="text-sm font-medium truncate">{s.customer}</div>
-                                  <div className="text-xs text-muted-foreground tabular-nums">{fmtTime(s.time)}</div>
+                                  <div className="text-xs text-muted-foreground tabular-nums">{reportDateLabel(reportSaleDay(s))}</div>
                                 </div>
                                 <div className="text-sm font-bold tabular-nums shrink-0">{fmt(s.net)}</div>
                               </div>
+                              <p className="text-sm whitespace-pre-line break-words">{formatSoldItems(s.items)}</p>
                               <div className="flex items-center justify-between gap-2">
-                                {s.payment_method ? <span className="text-xs text-muted-foreground">{labelPM(s.payment_method)}</span> : <span />}
+                                {s.payment_method ? <span className="text-xs text-muted-foreground">{salePaymentLabel(s)}</span> : <span />}
                                 {statusBadge(s.payment_status)}
                               </div>
                               {s.notes && (
@@ -1240,6 +1144,7 @@ export default function Reports() {
                               <TableRow className="border-b border-border hover:bg-transparent">
                                 <TableHead className="h-9 w-20 text-[11px] uppercase tracking-wider">Hora</TableHead>
                                 <TableHead className="h-9 text-[11px] uppercase tracking-wider">Cliente</TableHead>
+                                <TableHead className="h-9 text-[11px] uppercase tracking-wider">Peças vendidas</TableHead>
                                 <TableHead className="h-9 text-[11px] uppercase tracking-wider">Pagamento</TableHead>
                                 <TableHead className="h-9 text-[11px] uppercase tracking-wider">Status</TableHead>
                                 <TableHead className="h-9 text-[11px] uppercase tracking-wider text-right">Valor</TableHead>
@@ -1247,14 +1152,15 @@ export default function Reports() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {list.slice(0, 30).map(s => (
+                              {list.map(s => (
                                 <TableRow key={s.id} className="border-b-0 odd:bg-muted/20 hover:bg-muted/40">
                                   <TableCell className="text-xs tabular-nums text-muted-foreground py-3">
                                     {new Date(s.time).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}
                                   </TableCell>
-                                  <TableCell className="text-sm py-3 max-w-[220px] truncate" title={s.customer}>{s.customer}</TableCell>
+                                  <TableCell className="text-sm py-3 max-w-[220px] break-words">{s.customer}</TableCell>
+                                  <TableCell className="text-sm py-3 min-w-[200px] whitespace-pre-line break-words">{formatSoldItems(s.items)}</TableCell>
                                   <TableCell className="py-3">
-                                    {s.payment_method ? <span className="text-xs text-muted-foreground">{labelPM(s.payment_method)}</span> : <span className="text-xs text-muted-foreground">—</span>}
+                                    {s.payment_method ? <span className="text-xs text-muted-foreground">{salePaymentLabel(s)}</span> : <span className="text-xs text-muted-foreground">—</span>}
                                   </TableCell>
                                   <TableCell className="py-3">{statusBadge(s.payment_status)}</TableCell>
                                   <TableCell className="text-right text-sm font-semibold tabular-nums py-3">{fmt(s.net)}</TableCell>
@@ -1292,7 +1198,7 @@ export default function Reports() {
                 <Card>
                   <CardContent className="p-5 md:p-6">
                     <div className="space-y-3">
-                      {cats.slice(0, 10).map(c => {
+                      {cats.map(c => {
                         const pct = (c.qty / totalQty) * 100;
                         const barPct = (c.qty / maxQty) * 100;
                         return (
