@@ -16,6 +16,8 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useSensitiveOpsPermission } from '@/hooks/useSensitiveOpsPermission';
 import SensitiveActionDialog from '@/components/SensitiveActionDialog';
 import { toast } from 'sonner';
+import { fetchAllReportRows } from '@/lib/reportQueries';
+import { exchangeTotals, financialDateLabel } from '@/lib/reportAuxiliary';
 
 interface ExchangeRow {
   id: string;
@@ -64,31 +66,29 @@ export default function TrocasReport() {
   const [cancelingExchange, setCancelingExchange] = useState<ExchangeRow | null>(null);
 
   const fmt = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const fmtDate = (d: string) => new Date(d).toLocaleDateString('pt-BR');
+  const fmtDate = financialDateLabel;
 
   const load = useCallback(async () => {
     if (!storeId) return;
     setLoading(true);
     try {
-      const { data } = await supabase
+      const list = await fetchAllReportRows<ExchangeRow>(() => supabase
         .from('exchanges')
         .select('id, customer_id, original_product_name, original_value, new_product_name, new_value, difference, settlement, amount_to_pay, troco_amount, credit_amount, is_avulsa, created_by, created_at, status, reason, notes')
         .eq('store_id', storeId)
         .order('created_at', { ascending: false })
-        .limit(300);
-      const list = (data as any as ExchangeRow[]) || [];
+        .order('id'));
       setRows(list);
 
-      const custIds = Array.from(new Set(list.map(r => r.customer_id).filter(Boolean))) as string[];
-      const empIds = Array.from(new Set(list.map(r => r.created_by).filter(Boolean))) as string[];
-      if (custIds.length) {
-        const { data: c } = await supabase.from('customers').select('id, name').in('id', custIds);
-        setNames(Object.fromEntries(((c as any[]) || []).map(x => [x.id, x.name])));
-      }
-      if (empIds.length) {
-        const { data: p } = await supabase.from('profiles').select('id, full_name').in('id', empIds);
-        setEmps(Object.fromEntries(((p as any[]) || []).map(x => [x.id, x.full_name])));
-      }
+      const [customers, employees] = await Promise.all([
+        fetchAllReportRows(() => supabase.from('customers').select('id, name').eq('store_id', storeId).order('id')),
+        fetchAllReportRows(() => supabase.from('profiles').select('id, full_name').eq('store_id', storeId).order('id')),
+      ]);
+      setNames(Object.fromEntries(customers.map(x => [x.id, x.name])));
+      setEmps(Object.fromEntries(employees.map(x => [x.id, x.full_name])));
+    } catch (error) {
+      setRows([]); setNames({}); setEmps({});
+      toast.error(error instanceof Error ? error.message : 'Não foi possível carregar as trocas.');
     } finally {
       setLoading(false);
     }
@@ -106,12 +106,7 @@ export default function TrocasReport() {
     );
   }, [rows, search, names]);
 
-  const totals = useMemo(() => ({
-    count: rows.length,
-    pay: rows.reduce((s, r) => s + Number(r.amount_to_pay || 0), 0),
-    troco: rows.reduce((s, r) => s + Number(r.troco_amount || 0), 0),
-    credito: rows.reduce((s, r) => s + Number(r.credit_amount || 0), 0),
-  }), [rows]);
+  const totals = useMemo(() => exchangeTotals(filtered), [filtered]);
 
   const openEdit = (r: ExchangeRow) => {
     setEditingExchange(r);
@@ -160,7 +155,7 @@ export default function TrocasReport() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Trocas</p><p className="text-2xl font-bold">{totals.count}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Recebido (diferença)</p><p className="text-xl font-bold text-orange-600">{fmt(totals.pay)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Diferença a pagar</p><p className="text-xl font-bold text-orange-600">{fmt(totals.pay)}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Troco devolvido</p><p className="text-xl font-bold text-blue-600">{fmt(totals.troco)}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Crédito gerado</p><p className="text-xl font-bold text-purple-600">{fmt(totals.credito)}</p></CardContent></Card>
       </div>

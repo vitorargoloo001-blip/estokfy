@@ -1,4 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllReportRows } from '@/lib/reportQueries';
+import { todayStrBR } from '@/lib/dateBR';
 
 export interface PdfRow { [k: string]: string | number }
 
@@ -73,7 +75,7 @@ export async function generateReportPdf(cfg: PdfReportConfig) {
       return acc;
     }, {} as Record<number, any>),
     margin: { left: 40, right: 40 },
-    didDrawPage: (data: any) => {
+    didDrawPage: () => {
       const str = `Página ${doc.getNumberOfPages()}`;
       doc.setFontSize(8);
       doc.setTextColor(140);
@@ -83,21 +85,21 @@ export async function generateReportPdf(cfg: PdfReportConfig) {
   });
 
   const safeName = cfg.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  doc.save(`${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`${safeName}-${todayStrBR()}.pdf`);
 }
 
 // ===== Filtros prontos =====
 
 export async function exportLowStockPdf(storeId: string) {
-  const { data } = await supabase.rpc('product_analytics', { p_store_id: storeId });
+  const data = await fetchAllReportRows(() => supabase.rpc('product_analytics', { p_store_id: storeId }).order('product_id'));
   const rows = (data || [])
-    .filter((p: any) => p.minimum_stock > 0 && p.on_hand <= p.minimum_stock)
+    .filter((p: any) => p.on_hand <= p.minimum_stock)
     .map((p: any) => ({
       name: p.name,
       on_hand: p.on_hand,
       minimum_stock: p.minimum_stock,
       daily_avg: Number(p.daily_avg || 0).toFixed(2),
-      days_to_empty: p.days_to_empty ? Math.round(Number(p.days_to_empty)) : '—',
+      days_to_empty: p.days_to_empty != null ? Math.round(Number(p.days_to_empty)) : '—',
     }));
   await generateReportPdf({
     title: 'Relatório de Estoque Baixo',
@@ -116,7 +118,7 @@ export async function exportLowStockPdf(storeId: string) {
 }
 
 export async function exportLowMarginPdf(storeId: string, threshold = 15) {
-  const { data } = await supabase.rpc('product_analytics', { p_store_id: storeId });
+  const data = await fetchAllReportRows(() => supabase.rpc('product_analytics', { p_store_id: storeId }).order('product_id'));
   const rows = (data || [])
     .filter((p: any) => Number(p.sale_price) > 0 && Number(p.margin_pct) < threshold)
     .sort((a: any, b: any) => Number(a.margin_pct) - Number(b.margin_pct))
@@ -144,29 +146,31 @@ export async function exportLowMarginPdf(storeId: string, threshold = 15) {
 }
 
 export async function exportOverduePdf(storeId: string) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [recvRes, payRes] = await Promise.all([
-    supabase.from('sales')
+  const today = todayStrBR();
+  const [receivables, payables] = await Promise.all([
+    fetchAllReportRows(() => supabase.from('sales')
       .select('id, due_date, amount_pending, customers(name)')
       .eq('store_id', storeId)
       .is('deleted_at', null)
+      .not('status', 'in', '(cancelled,refunded,returned)')
+      .gt('amount_pending', 0)
       .in('payment_status', ['pending', 'partial'])
-      .lt('due_date', today),
-    supabase.from('accounts_payable')
+      .lt('due_date', today).order('id')),
+    fetchAllReportRows(() => supabase.from('accounts_payable')
       .select('id, description, due_date, amount, suppliers(name)')
       .eq('store_id', storeId)
       .eq('status', 'pending')
-      .lt('due_date', today),
+      .lt('due_date', today).order('id')),
   ]);
 
   const rows = [
-    ...(recvRes.data || []).map((s: any) => ({
+    ...receivables.map((s: any) => ({
       tipo: 'A receber',
       descricao: s.customers?.name || `Venda ${String(s.id).slice(0, 8)}`,
       vencimento: new Date(s.due_date + 'T00:00').toLocaleDateString('pt-BR'),
       valor: `R$ ${Number(s.amount_pending).toFixed(2)}`,
     })),
-    ...(payRes.data || []).map((p: any) => ({
+    ...payables.map((p: any) => ({
       tipo: 'A pagar',
       descricao: p.description + (p.suppliers?.name ? ` (${p.suppliers.name})` : ''),
       vencimento: new Date(p.due_date + 'T00:00').toLocaleDateString('pt-BR'),
@@ -190,10 +194,10 @@ export async function exportOverduePdf(storeId: string) {
 }
 
 export async function exportIdleProductsPdf(storeId: string, daysIdle = 60) {
-  const { data } = await supabase.rpc('product_analytics', { p_store_id: storeId });
+  const data = await fetchAllReportRows(() => supabase.rpc('product_analytics', { p_store_id: storeId }).order('product_id'));
   const rows = (data || [])
     .filter((p: any) => p.on_hand > 0 && (p.days_idle == null || p.days_idle >= daysIdle))
-    .sort((a: any, b: any) => (Number(b.days_idle || 9999)) - (Number(a.days_idle || 9999)))
+    .sort((a: any, b: any) => (Number(b.days_idle ?? 9999)) - (Number(a.days_idle ?? 9999)))
     .map((p: any) => ({
       name: p.name,
       on_hand: p.on_hand,

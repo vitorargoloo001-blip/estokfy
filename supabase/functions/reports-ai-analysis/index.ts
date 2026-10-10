@@ -3,6 +3,9 @@
 // Persists analysis in report_ai_analyses for the authenticated user's store
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+import { loadDetailedReport } from "../_shared/detailed-report.ts";
+import { validReportRange } from "../_shared/report-utils.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -43,8 +46,9 @@ Deno.serve(async (req) => {
     if (!profile?.is_active) return json({ error: "sem_permissao" }, 403);
 
     const body = await req.json().catch(() => ({}));
-    const { summary, sales, returns, stock, finance, period } = body || {};
-    if (!summary || !period) return json({ error: "payload_invalido" }, 400);
+    const { period, seller_id: seller } = body || {};
+    if (!period || !validReportRange(period.from, period.to)) return json({ error: "payload_invalido" }, 400);
+    const { summary, sales, stock, finance } = await loadDetailedReport(svc, profile.store_id, { from: period.from, to: period.to, seller });
 
     const fmt = (v: number) => `R$ ${Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -180,6 +184,7 @@ Seja direto, evite generalidades. Se algo estiver bom, mencione no summary. Use 
         period_end: period.to,
         analysis_text: text,
         metadata: {
+          seller_id: seller || null,
           gross_revenue: summary.gross_revenue,
           net_revenue: summary.net_revenue,
           sales_count: summary.sales_count,
@@ -189,7 +194,7 @@ Seja direto, evite generalidades. Se algo estiver bom, mencione no summary. Use 
       .select("id, created_at")
       .single();
 
-    if (saveErr) console.error("Failed to persist analysis:", saveErr);
+    if (saveErr) throw saveErr;
 
     return json({
       analysis: text,

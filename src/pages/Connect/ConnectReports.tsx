@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,13 +8,13 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import {
-  FileText, Download, RefreshCw, TrendingUp, CheckCircle2,
-  AlertCircle, Clock, XCircle, ArrowUpRight, ArrowDownRight, Minus,
-} from "lucide-react";
+import { FileText, Download, RefreshCw, TrendingUp, CheckCircle2, AlertCircle, Clock, XCircle, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+
+import { financialDateLabel, reconciliationPeriod } from "@/lib/reportAuxiliary";
+import { isoToDayBR, TZ_BR } from "@/lib/dateBR";
 
 interface ReportSummary {
   period_start: string;
@@ -71,11 +71,10 @@ interface MonthComparison {
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v ?? 0);
 
-const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString("pt-BR") : "—";
+const fmtDate = financialDateLabel;
 
 const fmtDateTime = (d: string | null) =>
-  d ? new Date(d).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
+  d ? new Date(d).toLocaleString("pt-BR", { timeZone: TZ_BR, dateStyle: "short", timeStyle: "short" }) : "—";
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   reconciled: { label: "Conciliada",  className: "bg-green-100 text-green-800" },
@@ -94,33 +93,7 @@ const METHOD_COLORS: Record<string, string> = {
   credit_card: "#ec4899", debit_card: "#06b6d4", money: "#84cc16", other: "#9ca3af",
 };
 
-function getPeriod(preset: string): { start: Date; end: Date } {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  switch (preset) {
-    case "current_month":
-      return { start: new Date(y, m, 1), end: new Date(y, m + 1, 0) };
-    case "last_month": {
-      const pm = m === 0 ? 11 : m - 1;
-      const py = m === 0 ? y - 1 : y;
-      return { start: new Date(py, pm, 1), end: new Date(py, pm + 1, 0) };
-    }
-    case "quarter": {
-      const qStart = new Date(y, Math.floor(m / 3) * 3, 1);
-      const qEnd = new Date(y, Math.floor(m / 3) * 3 + 3, 0);
-      return { start: qStart, end: qEnd };
-    }
-    default: {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(start.getDate() - 30);
-      return { start, end };
-    }
-  }
-}
-
-function toISO(d: Date) { return d.toISOString().split("T")[0]; }
+function toISO(d: Date) { return isoToDayBR(d.toISOString()); }
 
 function DeltaBadge({ current, prev }: { current: number; prev: number }) {
   if (prev === 0) return <span className="text-xs text-muted-foreground">—</span>;
@@ -144,35 +117,40 @@ export default function ConnectReports() {
   const [methodBreakdown, setMethodBreakdown] = useState<MethodBreakdown[]>([]);
   const [monthComp, setMonthComp]     = useState<MonthComparison | null>(null);
 
+  const requestSeq = useRef(0);
   const load = useCallback(async () => {
     if (!profile?.store_id) return;
-    const { start, end } = getPeriod(preset);
-    setLoading(true);
+    const { start, end } = reconciliationPeriod(preset);
+    const request = ++requestSeq.current;
+    setLoading(true); setSummary(null); setTransactions([]); setMethodBreakdown([]); setMonthComp(null);
     try {
       const [reportRes, methodRes, compRes] = await Promise.all([
         supabase.rpc("get_reconciliation_report", {
           p_store_id: profile.store_id,
-          p_start_date: toISO(start),
-          p_end_date: toISO(end),
+          p_start_date: start,
+          p_end_date: end,
         }),
         supabase.rpc("get_reconciliation_by_method", {
           p_store_id: profile.store_id,
-          p_start_date: toISO(start),
-          p_end_date: toISO(end),
+          p_start_date: start,
+          p_end_date: end,
         }),
         supabase.rpc("get_monthly_comparison", { p_store_id: profile.store_id }),
       ]);
 
       if (reportRes.error) throw reportRes.error;
+      if (methodRes.error) throw methodRes.error;
+      if (compRes.error) throw compRes.error;
+      if (request !== requestSeq.current) return;
       const d = reportRes.data as unknown as { summary: ReportSummary; transactions: ReportTransaction[] };
       setSummary(d.summary);
       setTransactions(d.transactions || []);
       setMethodBreakdown((methodRes.data as MethodBreakdown[]) || []);
       setMonthComp(compRes.data as unknown as MonthComparison | null);
     } catch (e) {
-      toast.error("Erro ao carregar relatório: " + String(e));
+      if (request === requestSeq.current) toast.error("Erro ao carregar relatório: " + String(e));
     } finally {
-      setLoading(false);
+      if (request === requestSeq.current) setLoading(false);
     }
   }, [profile?.store_id, preset]);
 
@@ -397,7 +375,7 @@ export default function ConnectReports() {
       doc.text("3. Divergências Identificadas", 14, curY);
       curY += 6;
 
-      const divergent = filtered.filter((t) => t.status === "divergent");
+      const divergent = transactions.filter((t) => t.status === "divergent");
       if (divergent.length === 0) {
         doc.setFont("helvetica", "italic");
         doc.setFontSize(10);
@@ -407,12 +385,12 @@ export default function ConnectReports() {
         autoTable(doc, {
           startY: curY,
           head: [["Data", "Valor", "Método", "Descrição", "Cliente"]],
-          body: divergent.slice(0, 50).map((t) => [
+          body: divergent.map((t) => [
             fmtDate(t.transaction_date),
             fmtBRL(t.amount),
             METHOD_LABELS[t.method] ?? t.method,
-            (t.description ?? "—").slice(0, 35),
-            (t.customer_name ?? "—").slice(0, 22),
+            t.description ?? "—",
+            t.customer_name ?? "—",
           ]),
           headStyles: { fillColor: [220, 38, 38], textColor: 255 },
           alternateRowStyles: { fillColor: [254, 242, 242] },
@@ -420,12 +398,7 @@ export default function ConnectReports() {
           styles: { fontSize: 8, cellPadding: 2 },
         });
         curY = (doc as any).lastAutoTable?.finalY ?? curY + 40;
-        if (divergent.length > 50) {
-          doc.setFontSize(8);
-          doc.setFont("helvetica", "italic");
-          doc.text(`(mostrando 50 de ${divergent.length} divergências)`, 14, curY + 4);
-          curY += 8;
-        }
+
       }
 
       // ── 4. Evolução mensal ────────────────────────────────────────────
@@ -513,13 +486,13 @@ export default function ConnectReports() {
       autoTable(doc, {
         startY: 18,
         head: [["Data", "Valor", "Método", "Descrição", "Status", "Cliente", "Conf. Score"]],
-        body: filtered.map((t) => [
+        body: transactions.map((t) => [
           fmtDate(t.transaction_date),
           fmtBRL(t.amount),
           METHOD_LABELS[t.method] ?? t.method,
-          (t.description ?? "—").slice(0, 28),
+          t.description ?? "—",
           STATUS_CONFIG[t.status]?.label ?? t.status,
-          (t.customer_name ?? "—").slice(0, 18),
+          t.customer_name ?? "—",
           t.confidence_score != null ? `${t.confidence_score}%` : "—",
         ]),
         headStyles: { fillColor: [55, 65, 81], textColor: 255 },
@@ -593,13 +566,13 @@ export default function ConnectReports() {
             {summary && (
               <div className="flex gap-2 ml-auto">
                 <Button variant="outline" size="sm" onClick={exportCSV}>
-                  <Download className="h-4 w-4 mr-1" />CSV
+                  <Download className="h-4 w-4 mr-1" />CSV (filtro)
                 </Button>
                 <Button variant="outline" size="sm" onClick={exportExcel}>
-                  <Download className="h-4 w-4 mr-1" />Excel
+                  <Download className="h-4 w-4 mr-1" />Excel completo
                 </Button>
                 <Button variant="outline" size="sm" onClick={exportPDF}>
-                  <Download className="h-4 w-4 mr-1" />PDF
+                  <Download className="h-4 w-4 mr-1" />PDF completo
                 </Button>
               </div>
             )}

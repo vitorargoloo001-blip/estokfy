@@ -138,6 +138,8 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   outro: 'Outro',
   other: 'Outro',
   return_offset: 'Abatimento por devolução',
+  credit: 'Crédito (sem entrada de caixa)',
+  nao_informado: 'Não informado',
 };
 
 export function labelMethod(m: string): string {
