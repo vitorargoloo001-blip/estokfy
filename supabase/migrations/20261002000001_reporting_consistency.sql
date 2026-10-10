@@ -115,7 +115,7 @@ BEGIN
     )
   ) INTO v_result;
   RETURN v_result;
-END; $function$
+END; $function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_financial_report_summary(uuid,date,date,uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_financial_report_summary(uuid,date,date,uuid) TO authenticated, service_role;
@@ -333,7 +333,7 @@ BEGIN
     )
   ) INTO v_result;
   RETURN v_result;
-END; $function$
+END; $function$;
 
 REVOKE EXECUTE ON FUNCTION public.obter_relatorio_operacional_v2(uuid,date,date,uuid,text,uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.obter_relatorio_operacional_v2(uuid,date,date,uuid,text,uuid) TO authenticated, service_role;
@@ -425,7 +425,7 @@ BEGIN
     'transactions', v_txns
   );
 END;
-$function$
+$function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_reconciliation_report(uuid,date,date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_reconciliation_report(uuid,date,date) TO authenticated, service_role;
@@ -466,7 +466,7 @@ BEGIN
   GROUP BY COALESCE(bt.method,'other')
   ORDER BY 3 DESC;
 END;
-$function$
+$function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_reconciliation_by_method(uuid,date,date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_reconciliation_by_method(uuid,date,date) TO authenticated, service_role;
@@ -528,7 +528,7 @@ BEGIN
   ) r;
   RETURN result;
 END;
-$function$
+$function$;
 
 REVOKE EXECUTE ON FUNCTION public.get_monthly_comparison(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_monthly_comparison(uuid) TO authenticated, service_role;
