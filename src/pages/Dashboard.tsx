@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { DollarSign, Package, ShoppingCart, AlertTriangle, TrendingUp, Plus, Truck, ArrowRight, Boxes, RotateCcw, Search, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { startOfTodayUTCISO, startOfMonthUTCISO, daysAgoStrBR, isoToDayBR, formatDayMonthBR } from '@/lib/dateBR';
+import { RECEIVED_EXCLUDED_METHODS } from '@/lib/reportCash';
 import SmartRecommendations from '@/components/SmartRecommendations';
 import TeamPerformanceCard from '@/components/TeamPerformanceCard';
 import SellerDashboard from '@/components/SellerDashboard';
@@ -76,9 +77,11 @@ export default function Dashboard() {
         // Pagamentos RECEBIDOS hoje (data de quitação — não data da venda).
         // return_offset é abatimento de devolução em dívida, nunca dinheiro
         // recebido de verdade — não pode entrar nesse total.
-        supabase.from('payments').select('amount').eq('store_id', storeId).gte('paid_at', today).neq('method', 'return_offset'),
+        supabase.from('payments').select('amount, sales!inner(deleted_at, status)').eq('store_id', storeId).gte('paid_at', today)
+          .not('method', 'in', RECEIVED_EXCLUDED_METHODS).is('sales.deleted_at', null).not('sales.status', 'in', '(cancelled,refunded,returned)'),
         // Pagamentos RECEBIDOS no mês (para receita real e gráfico diário)
-        supabase.from('payments').select('amount, paid_at').eq('store_id', storeId).gte('paid_at', monthStart).neq('method', 'return_offset'),
+        supabase.from('payments').select('amount, paid_at, sales!inner(deleted_at, status)').eq('store_id', storeId).gte('paid_at', monthStart)
+          .not('method', 'in', RECEIVED_EXCLUDED_METHODS).is('sales.deleted_at', null).not('sales.status', 'in', '(cancelled,refunded,returned)'),
         // Pendente gerado hoje (vendas a prazo do dia)
         supabase.from('sales').select('amount_pending').eq('store_id', storeId).is('deleted_at', null).gte('created_at', today).in('payment_status', ['pending', 'partial']),
         supabase.from('sales').select('id, net_total, status, payment_status, created_at, customers(name)').eq('store_id', storeId).is('deleted_at', null).order('created_at', { ascending: false }).limit(5),

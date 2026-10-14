@@ -39,6 +39,14 @@ const PAY_STATUS = [
   { value: 'pending', label: 'Pendente (a prazo)' },
 ];
 
+const METHOD_LABEL: Record<string, string> = {
+  pix: 'PIX', cash: 'Dinheiro', credit_card: 'Cartão crédito', debit_card: 'Cartão débito',
+  transfer: 'Transferência', card: 'Cartão', credit: 'Crédito de loja', return_offset: 'Abatimento por devolução',
+};
+// Recebimentos em dinheiro real podem ter a forma corrigida (o caixa acompanha).
+const CORRECTABLE_METHODS = ['pix', 'cash', 'credit_card', 'debit_card', 'transfer', 'card'];
+const CORRECTION_TARGETS = ['pix', 'cash', 'credit_card', 'debit_card', 'transfer'];
+
 const fmt = (v: number) => (Number.isFinite(v) ? v : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 interface ItemRow {
@@ -52,13 +60,16 @@ interface ItemRow {
 export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: EditSaleDialogProps) {
   const { profile } = useAuth();
   const role = profile?.role || '';
-  const canEdit = ['owner', 'admin', 'manager'].includes(role);
+  const isManager = ['owner', 'admin', 'manager'].includes(role);
+  const isSeller = role === 'sales';
   const canForceNegative = ['owner', 'admin'].includes(role);
 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const saving = useRef(false);
   const [origSale, setOrigSale] = useState<any | null>(null);
+  // Vendedora edita só a própria venda; enquanto a venda carrega, não bloqueia a tela.
+  const canEdit = isManager || (isSeller && (!origSale || origSale.created_by === profile?.id));
   const [origItems, setOrigItems] = useState<ItemRow[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -78,6 +89,11 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
   const [allowNegative, setAllowNegative] = useState(false);
   const [revertConfirmText, setRevertConfirmText] = useState('');
   const [wantsStatusChange, setWantsStatusChange] = useState(false);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [correction, setCorrection] = useState<{ id: string; from: string; amount: number } | null>(null);
+  const [correctionMethod, setCorrectionMethod] = useState('');
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [correcting, setCorrecting] = useState(false);
 
   useEffect(() => {
     if (!open || !saleId || !profile) return;
@@ -90,6 +106,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
     setAllowNegative(false);
     setRevertConfirmText('');
     setWantsStatusChange(false);
+    setCorrection(null);
 
     // Carrega produtos com paginação para suportar lojas grandes (>2000 itens)
     const loadAllProducts = async () => {
@@ -116,7 +133,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
       supabase.from('sales').select('*').eq('id', saleId).maybeSingle(),
       supabase.from('sale_items').select('*, products(name, on_hand)').eq('sale_id', saleId),
       // V1: pega o ÚLTIMO pagamento (mais recente), não o primeiro
-      supabase.from('payments').select('method').eq('sale_id', saleId).order('paid_at', { ascending: false }).limit(1),
+      supabase.from('payments').select('id, method, amount, paid_at').eq('sale_id', saleId).order('paid_at', { ascending: false }),
       supabase.from('customers').select('id, name').eq('store_id', profile.store_id).order('name'),
       loadAllProducts(),
     ]).then(([s, si, pm, cs, prAll]) => {
@@ -147,6 +164,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
         // — se for o último payment carregado (sempre o caso pra uma venda
         // ainda 100% pendente), cai pro padrão em vez de deixar o estado
         // com um valor que a RPC agora rejeita ao marcar como paga.
+        setPayments(pm.data || []);
         const loadedMethod = pm.data?.[0]?.method;
         setPaymentMethod(loadedMethod && loadedMethod !== 'pending' ? loadedMethod : 'pix');
       }
@@ -197,6 +215,27 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
   const willRevertPayment = wasPaid && paymentStatus !== 'paid';
   const REVERT_CONFIRM_WORD = 'ESTORNAR';
   const confirmRevert = revertConfirmText.trim().toUpperCase() === REVERT_CONFIRM_WORD;
+
+  const confirmCorrection = async () => {
+    if (!saleId || !correction || !correctionMethod || correcting) return;
+    setCorrecting(true);
+    try {
+      const { error } = await (supabase as any).rpc('correct_sale_payment_method', {
+        p_payment_id: correction.id,
+        p_method: correctionMethod,
+        p_reason: correctionReason.trim(),
+      });
+      if (error) throw error;
+      toast.success(`Forma corrigida para ${METHOD_LABEL[correctionMethod]}`);
+      setCorrection(null);
+      const { data } = await supabase.from('payments').select('id, method, amount, paid_at').eq('sale_id', saleId).order('paid_at', { ascending: false });
+      setPayments(data || []);
+    } catch (err: any) {
+      toast.error(err?.message || 'Erro ao corrigir a forma de pagamento');
+    } finally {
+      setCorrecting(false);
+    }
+  };
 
   const validate = (): string | null => {
     if (!canEdit) return 'Sem permissão para editar vendas';
@@ -276,7 +315,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Sem permissão</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Apenas owner, admin ou manager podem editar vendas.</p>
+          <p className="text-sm text-muted-foreground">{isSeller ? 'Você só pode editar as vendas feitas por você.' : 'Apenas owner, admin ou manager podem editar vendas.'}</p>
         </DialogContent>
       </Dialog>
     );
@@ -397,7 +436,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
                   <Label>Data da venda</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn('w-full h-10 justify-start text-left font-normal')}>
+                      <Button variant="outline" disabled={isSeller} className={cn('w-full h-10 justify-start text-left font-normal')}>
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {format(createdAt, 'dd/MM/yyyy HH:mm')}
                       </Button>
@@ -466,13 +505,15 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
                   {wasPaid && !wantsStatusChange ? (
                     <div className="flex h-10 items-center justify-between rounded-md border bg-muted/40 px-3">
                       <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Pago</span>
-                      <button
-                        type="button"
-                        className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                        onClick={() => setWantsStatusChange(true)}
-                      >
-                        Marcar como não paga
-                      </button>
+                      {!isSeller && (
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                          onClick={() => setWantsStatusChange(true)}
+                        >
+                          Marcar como não paga
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <Select value={paymentStatus} onValueChange={setPaymentStatus}>
@@ -491,6 +532,49 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
               </div>
               {willRevertPayment && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">⚠ Isso vai estornar o pagamento já recebido desta venda ({fmt(Number(origSale?.amount_paid) || 0)}) e marcá-la como não paga — exige confirmação na próxima tela. Os recebimentos anteriores são preservados; a forma escolhida vale para valores adicionais. Para devolver parte do dinheiro, use "Estornar" na tela de detalhes da venda.</p>
+              )}
+            </section>
+
+            <Separator />
+
+            {/* Recebimentos já lançados — a forma de cada um pode ser corrigida (caixa) */}
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold">Recebimentos desta venda</h3>
+              {payments.filter(p => p.method !== 'pending').length === 0 && (
+                <p className="text-xs text-muted-foreground">Nenhum recebimento registrado.</p>
+              )}
+              {payments.filter(p => p.method !== 'pending').map(p => (
+                <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                  <span>
+                    <b className="tabular-nums">{fmt(Number(p.amount))}</b> · {METHOD_LABEL[p.method] || p.method}
+                    <span className="text-xs text-muted-foreground"> · {format(new Date(p.paid_at), 'dd/MM/yyyy HH:mm')}</span>
+                  </span>
+                  {CORRECTABLE_METHODS.includes(p.method) && correction?.id !== p.id && (
+                    <Button size="sm" variant="outline" className="h-7" onClick={() => { setCorrection({ id: p.id, from: p.method, amount: Number(p.amount) }); setCorrectionMethod(''); setCorrectionReason(''); }}>
+                      Corrigir forma
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {correction && (
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+                  <p className="text-xs">Corrigir {fmt(correction.amount)} recebidos como {METHOD_LABEL[correction.from] || correction.from}. O caixa é ajustado junto.</p>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <Select value={correctionMethod} onValueChange={setCorrectionMethod}>
+                      <SelectTrigger className="h-9"><SelectValue placeholder="Forma correta" /></SelectTrigger>
+                      <SelectContent>
+                        {CORRECTION_TARGETS.filter(m => m !== correction.from).map(m => <SelectItem key={m} value={m}>{METHOD_LABEL[m]}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Input className="h-9" placeholder="Motivo (ex.: cliente pagou no PIX)" value={correctionReason} onChange={e => setCorrectionReason(e.target.value)} />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" disabled={correcting} onClick={() => setCorrection(null)}>Cancelar</Button>
+                    <Button size="sm" disabled={correcting || !correctionMethod || correctionReason.trim().length < 3} onClick={confirmCorrection}>
+                      {correcting ? 'Salvando...' : 'Confirmar correção'}
+                    </Button>
+                  </div>
+                </div>
               )}
             </section>
 

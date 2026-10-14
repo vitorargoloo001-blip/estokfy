@@ -17,6 +17,7 @@ export interface ReportSale {
   time: string;
   sale_date?: string;
   customer: string;
+  seller?: string;
   customer_id?: string | null;
   items?: ReportSaleItem[];
   payment_method: string | null;
@@ -48,7 +49,7 @@ export function addSalesReportTable(doc: jsPDF, table: typeof autoTable, sales: 
     head: [['Data / hora', 'Cliente', 'Peças vendidas', 'Pagamento / status', 'Total venda', 'Pendente']],
     body: ordered.map(sale => [
       `${reportDateLabel(reportSaleDay(sale))}\n${new Date(sale.time).toLocaleTimeString('pt-BR', { timeZone: TZ_BR, hour: '2-digit', minute: '2-digit' })}`,
-      `${sale.customer}${sale.notes ? `\nObs.: ${sale.notes}` : ''}`,
+      `${sale.customer}${sale.seller ? `\nVend.: ${sale.seller}` : ''}${sale.notes ? `\nObs.: ${sale.notes}` : ''}`,
       formatSoldItems(sale.items),
       `${salePaymentLabel(sale)}\n${status[sale.payment_status || ''] || 'Não informado'}`,
       money(sale.net), money(sale.amount_pending || 0),

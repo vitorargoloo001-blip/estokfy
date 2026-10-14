@@ -199,3 +199,11 @@ GRANT ALL ON public.<t> TO service_role;
 ```
 
 `anon` só recebe SELECT em tabelas com política pública (nenhuma atual além de leitura via edge `pixel-events` que usa service_role).
+
+
+## Migração 20261014000001 (caixa e edição pela vendedora)
+
+- `payments.created_at timestamptz DEFAULT now()`: hora real do lançamento. Linhas antigas ficam `NULL` (o código usa `paid_at`).
+- `edit_sale_atomic` (mesma assinatura de 12 argumentos, uma versão): aceita papel `sales` com as travas de própria venda, sem estorno e sem data.
+- `correct_sale_payment_method(uuid, text, text)`: nova RPC, `REVOKE ... FROM PUBLIC, anon`.
+- Teste: `supabase/tests/seller_sale_edit_regression_tests.sql` (rodar dentro de BEGIN/ROLLBACK).

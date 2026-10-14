@@ -131,7 +131,9 @@ export default function Sales() {
   const [deleteSale, setDeleteSale] = useState<any | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const canEditSales = ['owner', 'admin', 'manager'].includes(profile?.role || '');
+  const isManagerPlus = ['owner', 'admin', 'manager'].includes(profile?.role || '');
+  // Vendedora edita só as vendas que ela mesma fez; gerente ou dono edita todas.
+  const canEditSale = (s: { created_by?: string | null }) => isManagerPlus || (profile?.role === 'sales' && s.created_by === profile?.id);
   const canDeleteSales = ['owner', 'admin', 'manager'].includes(profile?.role || '');
   const openDetail = (id: string) => { setSelectedSaleId(id); setDetailOpen(true); };
 
@@ -277,14 +279,14 @@ export default function Sales() {
                       )}
                     </div>
                   </div>
-                  {(canSettle || canEditSales || canDeleteSales) && (
+                  {(canSettle || canEditSale(s) || canDeleteSales) && (
                     <div className="flex gap-2 mt-2">
                       {canSettle && (
                         <Button size="sm" variant="outline" className="flex-1 h-8" onClick={e => { e.stopPropagation(); setSettleSale(s); }}>
                           <Wallet className="h-3.5 w-3.5 mr-1" /> Receber
                         </Button>
                       )}
-                      {canEditSales && (
+                      {canEditSale(s) && (
                         <Button size="sm" variant="outline" className="flex-1 h-8" onClick={e => { e.stopPropagation(); setEditSaleId(s.id); }}>
                           <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
                         </Button>
@@ -356,7 +358,7 @@ export default function Sales() {
                               <Wallet className="h-3.5 w-3.5" />
                             </Button>
                           )}
-                          {canEditSales && (
+                          {canEditSale(s) && (
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Editar venda" onClick={e => { e.stopPropagation(); setEditSaleId(s.id); }}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>

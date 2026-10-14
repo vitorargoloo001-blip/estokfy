@@ -120,3 +120,10 @@ Cada módulo: página, tabelas, RPCs, relatórios alimentados.
 - `/verificacao-pagamento` (`PaymentVerification.tsx`) — envia comprovante.
 - `/acesso-suspenso` (`AccessSuspended.tsx`).
 - **Edge:** `verify-payment`.
+
+
+## Relatórios: Fechamento de caixa
+
+- Seção "Fechamento de caixa" no topo dos relatórios (componente `src/components/CashClosingSection.tsx`, dados de `reports-detailed` em `caixa`, lógica pura em `src/lib/reportCash.ts`).
+- Filtro Todas / Dinheiro / PIX / Cartão. Listas: vendas pagas na hora, contas a receber pagas (com a data da venda original) e vendas em aberto (fiado), mesmo quando quitadas depois.
+- Vendedora: `src/components/EditSaleDialog.tsx` mostra "Recebimentos desta venda" com "Corrigir forma" nos pagamentos em dinheiro real.

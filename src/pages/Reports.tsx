@@ -26,6 +26,8 @@ import { todayStrBR, daysAgoStrBR, firstOfMonthStrBR, isoToDayBR, TZ_BR } from '
 import { getMovementMeta, movementBadgeClass } from '@/lib/stockMovementLabels';
 import { addSalesReportTable, formatSoldItems, reportDateLabel, reportSaleDay, salePaymentLabel, type ReportSale } from '@/lib/reportSales';
 import { validReportRange } from '@/lib/reportQueries';
+import CashClosingSection from '@/components/CashClosingSection';
+import { addCashReportTables, type CashData } from '@/lib/reportCash';
 // jsPDF (~166KB) é carregado apenas quando o usuário clica em "Baixar PDF"
 
 // ============= Types =============
@@ -90,6 +92,7 @@ interface ReportDetailed {
   stock: StockData;
   finance: FinanceData;
   timeline: TimelineEvent[];
+  caixa?: CashData;
 }
 interface AIStructured { summary: string; alerts: string[]; suggestions: string[]; }
 interface SavedAnalysis {
@@ -479,6 +482,13 @@ export default function Reports() {
     const afterTable = () => { y = (doc as any).lastAutoTable.finalY + 22; };
 
     doc.setTextColor(0);
+
+    // === 0. FECHAMENTO DE CAIXA (o que entrou, por forma e por tipo) ===
+    if (data.caixa) {
+      section('Fechamento de caixa');
+      addCashReportTables(doc, autoTable, data.caixa, y + 4);
+      y = (doc as any).lastAutoTable.finalY + 22;
+    }
 
     // === 1. VENDAS REALIZADAS ===
     if (data.sales.list.length) {
@@ -1056,6 +1066,8 @@ export default function Reports() {
           </section>
 
 
+          {data.caixa && <CashClosingSection caixa={data.caixa} />}
+
           {/* ============= 2. CAIXA LÍQUIDO REAL (apenas tela — não vai para o PDF) ============= */}
           {(() => {
             const recebido = Number(data.finance.income_total ?? 0);
@@ -1123,6 +1135,7 @@ export default function Reports() {
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">
                                   <div className="text-sm font-medium truncate">{s.customer}</div>
+                                  <div className="text-[11px] text-muted-foreground truncate">Vend.: {s.seller || '—'}</div>
                                   <div className="text-xs text-muted-foreground tabular-nums">{reportDateLabel(reportSaleDay(s))}</div>
                                 </div>
                                 <div className="text-sm font-bold tabular-nums shrink-0">{fmt(s.net)}</div>
@@ -1157,7 +1170,10 @@ export default function Reports() {
                                   <TableCell className="text-xs tabular-nums text-muted-foreground py-3">
                                     {new Date(s.time).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}
                                   </TableCell>
-                                  <TableCell className="text-sm py-3 max-w-[220px] break-words">{s.customer}</TableCell>
+                                  <TableCell className="text-sm py-3 max-w-[220px] break-words">
+                                    {s.customer}
+                                    <div className="text-[11px] text-muted-foreground">Vend.: {s.seller || '—'}</div>
+                                  </TableCell>
                                   <TableCell className="text-sm py-3 min-w-[200px] whitespace-pre-line break-words">{formatSoldItems(s.items)}</TableCell>
                                   <TableCell className="py-3">
                                     {s.payment_method ? <span className="text-xs text-muted-foreground">{salePaymentLabel(s)}</span> : <span className="text-xs text-muted-foreground">—</span>}
