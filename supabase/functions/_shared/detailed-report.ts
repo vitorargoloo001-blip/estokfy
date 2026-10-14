@@ -36,6 +36,7 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
       lowStockRes,
       productsRes,
       customersRes,
+      profilesRes,
       suppliersRes,
     ] = await Promise.all([
       read(() => svc.from("sales")
@@ -47,7 +48,7 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
         .eq("sales.store_id", storeId)
         .gte("sales.sale_date", from).lte("sales.sale_date", to).order("sale_id").order("product_id")),
       read(() => svc.from("payments")
-        .select("id, sale_id, method, amount, paid_at, created_by, sales(sale_date, status, deleted_at, customer_id, created_by)")
+        .select("id, sale_id, method, amount, paid_at, created_at, note, created_by, sales(sale_date, status, deleted_at, customer_id, created_by, registered_at, net_total)")
         .eq("store_id", storeId)
         .gte("paid_at", fromIso).lte("paid_at", toIso).order("id")),
       read(() => svc.from("returns")
@@ -76,6 +77,9 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
       read(() => svc.from("customers")
         .select("id, name")
         .eq("store_id", storeId).order("id")),
+      read(() => svc.from("profiles")
+        .select("id, full_name")
+        .eq("store_id", storeId).order("id")),
       read(() => svc.from("suppliers")
         .select("id, name")
         .eq("store_id", storeId).order("id")), 
@@ -99,6 +103,8 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
     const productMap = new Map(products.map(p => [p.id, p]));
     const customerMap = new Map(customers.map(c => [c.id, c.name]));
     const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
+    const sellerMap = new Map((profilesRes.data || []).map((p: any) => [p.id, p.full_name]));
+    const sellerName = (id?: string | null) => (id && sellerMap.get(id)) || "—";
 
     // "Vendas válidas" = não canceladas, não estornadas, não soft-deletadas
     // "Vendas válidas" = não canceladas, não estornadas, não soft-deletadas (filtradas por sale_date)
@@ -189,7 +195,7 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
     let salePaymentsAll: Array<{ sale_id: string; method: string; amount: number }> = [];
     if (realizedSaleIds.length > 0) {
       const { data: spa } = await read(() => svc.from("payments")
-        .select("id, sale_id, method, amount, sales!inner(store_id, sale_date)")
+        .select("id, sale_id, method, amount, paid_at, created_at, sales!inner(store_id, sale_date, registered_at)")
         .eq("store_id", storeId).eq("sales.store_id", storeId)
         .gte("sales.sale_date", from).lte("sales.sale_date", to).order("id"));
       salePaymentsAll = spa.filter((p: any) => !["pending", "a_prazo"].includes(p.method));
@@ -461,6 +467,80 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
       pending: round2(pendingByDay[d]),
     }));
 
+    // --- Fechamento de caixa: tudo que entrou no período, por forma e por tipo ---
+    // "venda" = pago no ato da venda; "recebimento" = baixa de conta a receber (fiado).
+    const AT_SALE_TOLERANCE_MS = 60_000;
+    const isAtSale = (p: any) => {
+      const reg = p.sales?.registered_at;
+      const at = p.created_at ?? p.paid_at;
+      if (!reg || !at) return false;
+      return Math.abs(new Date(at).getTime() - new Date(reg).getTime()) <= AT_SALE_TOLERANCE_MS;
+    };
+    const caixaEntries = validPayments.map((p: any) => ({
+      id: p.id,
+      kind: isAtSale(p) ? "venda" : "recebimento",
+      time: p.paid_at,
+      registered_at: p.created_at ?? p.paid_at,
+      method: (p.method || "outro").toLowerCase(),
+      amount: round2(num(p.amount)),
+      customer: customerMap.get(p.sales?.customer_id || "") || "Sem cliente",
+      seller: sellerName(p.sales?.created_by ?? p.created_by),
+      sale_id: p.sale_id,
+      sale_date: p.sales?.sale_date ?? null,
+    })).sort((a, b) => String(a.time).localeCompare(String(b.time)));
+
+    const caixaByMethod: Record<string, { amount: number; count: number; sales_amount: number; receivables_amount: number }> = {};
+    for (const e of caixaEntries) {
+      const b = (caixaByMethod[e.method] ??= { amount: 0, count: 0, sales_amount: 0, receivables_amount: 0 });
+      b.amount += e.amount;
+      b.count += 1;
+      if (e.kind === "venda") b.sales_amount += e.amount;
+      else b.receivables_amount += e.amount;
+    }
+    for (const b of Object.values(caixaByMethod)) {
+      b.amount = round2(b.amount);
+      b.sales_amount = round2(b.sales_amount);
+      b.receivables_amount = round2(b.receivables_amount);
+    }
+
+    // Quanto de cada venda foi pago no ato (independe da data do recebimento).
+    const paidAtSale = new Map<string, number>();
+    for (const p of salePaymentsAll) {
+      if (!realizedSaleIdSet.has(p.sale_id) || !isAtSale(p)) continue;
+      paidAtSale.set(p.sale_id, (paidAtSale.get(p.sale_id) || 0) + num(p.amount));
+    }
+    // Vendas que ficaram (total ou parcialmente) em aberto no ato, mesmo que já quitadas depois.
+    const openSales = realizedSales.map(s => ({
+      s,
+      openAtSale: Math.max(0, num(s.net_total) - (paidAtSale.get(s.id) || 0)),
+    })).filter(x => x.openAtSale > 0.005).map(({ s, openAtSale }) => ({
+      sale_id: s.id,
+      time: s.created_at,
+      customer: customerMap.get(s.customer_id || "") || "Sem cliente",
+      seller: sellerName(s.created_by),
+      net: round2(num(s.net_total)),
+      open_at_sale: round2(openAtSale),
+      pending_now: round2(num(s.amount_pending)),
+      due_date: s.due_date || null,
+    })).sort((a, b) => String(a.time).localeCompare(String(b.time)));
+    const openTotal = round2(openSales.reduce((t, o) => t + o.pending_now, 0));
+
+    const nonCash = { credit: 0, return_offset: 0 };
+    for (const p of payments as any[]) {
+      if (p.method !== "credit" && p.method !== "return_offset") continue;
+      if (p.sales && !isValidReportSale(p.sales)) continue;
+      nonCash[p.method as "credit" | "return_offset"] += num(p.amount);
+    }
+
+    const caixa = {
+      total: round2(amountReceived),
+      by_method: caixaByMethod,
+      entries: caixaEntries,
+      open_sales: openSales,
+      open_total: openTotal,
+      non_cash: { credit: round2(nonCash.credit), return_offset: round2(nonCash.return_offset) },
+    };
+
     // --- Comparison period (optional) ---
     let previous: Record<string, number> | null = null;
     if (compareFrom && compareTo) {
@@ -524,6 +604,7 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
           items: itemsBySale.get(s.id) || [],
           payment_methods: [...new Set([...(paysBySale.get(s.id) || []).map(p => p.method), ...(num(s.amount_pending) > 0 ? ["a_prazo"] : [])])],
           customer: customerMap.get(s.customer_id || "") || "—",
+          seller: sellerName(s.created_by),
           gross: round2(num(s.gross_total)),
           discount: round2(num(s.discount_total)),
           shipping: round2(num(s.shipping_fee)),
@@ -593,6 +674,7 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
           payment_method: e.payment_method || null,
         })),
       },
+      caixa,
       timeline: timeline.map(t => ({ ...t, amount: t.amount !== undefined ? round2(t.amount) : undefined })),
 };
 }

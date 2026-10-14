@@ -114,3 +114,10 @@ Implementado em `src/lib/roleAccess.ts` → `canAccessRoute(role, path)` consumi
 - Super admin (`system_admins.email`) ignora filtros e pode suspender lojas (`stores.access_enabled`).
 - Ações registradas em `super_admin_logs`.
 - Loja sem pagamento confirmado pelo super admin → redirecionada para `/verificacao-pagamento`.
+
+
+## Vendedora e correção de caixa (2026-10-14)
+
+- Papel `sales` edita **somente** as vendas que criou (`sales.created_by = profiles.id` do próprio usuário), via `edit_sale_atomic`. Não pode estornar pagamento (pago → não pago) nem alterar a data da venda (`created_at` é ignorado para ela).
+- `correct_sale_payment_method(p_payment_id, p_method, p_reason)` troca a forma de um recebimento em dinheiro real (pix, cash, credit_card, debit_card, transfer, card). Atualiza o espelho em `cash_entries`. Recusa pagamento conciliado com o banco e recebimento de crédito/abatimento/pendente.
+- Relatórios → "Fechamento de caixa": `caixa.total` é igual a `summary.amount_received`. Cada entrada é "venda" (paga no ato: `payments.created_at`, ou `paid_at` no legado, a até 60 s de `sales.registered_at`) ou "recebimento" (baixa de conta a receber).
