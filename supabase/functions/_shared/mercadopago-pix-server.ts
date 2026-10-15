@@ -5,8 +5,10 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mpFetch } from "./mercadopago.ts";
 import { mapPixOrderStatus, paidAmountOf, type PixOrderResponse, type PixStatus } from "./mercadopago-pix.ts";
 
+// Produção primeiro: quando MP_PIX_ACCESS_TOKEN existir, ele é o que vale.
+// MP_PIX_TEST_ACCESS_TOKEN só é usado se o de produção não estiver configurado.
 export function pixAccessToken(): string | null {
-  return Deno.env.get("MP_PIX_TEST_ACCESS_TOKEN") ?? Deno.env.get("MP_PIX_ACCESS_TOKEN") ?? null;
+  return Deno.env.get("MP_PIX_ACCESS_TOKEN") ?? Deno.env.get("MP_PIX_TEST_ACCESS_TOKEN") ?? null;
 }
 
 export interface ApplyOrderResult {

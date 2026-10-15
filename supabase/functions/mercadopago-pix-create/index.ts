@@ -4,11 +4,12 @@
 // no Mercado Pago (Orders API) e devolve QR Code e copia-e-cola.
 //
 // Body: { saleId: uuid }   Auth: Authorization: Bearer <jwt do usuário>
-// Env: MP_PIX_TEST_ACCESS_TOKEN (ou MP_PIX_ACCESS_TOKEN em produção),
+// Env: MP_PIX_ACCESS_TOKEN (produção) ou MP_PIX_TEST_ACCESS_TOKEN (teste),
 //      MP_PIX_STORE_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import { MpApiError, MP_API } from "../_shared/mercadopago.ts";
 import { CORS, json, serviceClient } from "../_shared/mercadopago-server.ts";
+import { pixAccessToken } from "../_shared/mercadopago-pix-server.ts";
 import {
   buildPixOrderPayload,
   parsePixOrderResponse,
@@ -25,7 +26,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  const token = Deno.env.get("MP_PIX_TEST_ACCESS_TOKEN") ?? Deno.env.get("MP_PIX_ACCESS_TOKEN");
+  const token = pixAccessToken();
   const pixStore = Deno.env.get("MP_PIX_STORE_ID");
   if (!token || !pixStore) return json({ error: "Pix pelo Mercado Pago ainda não configurado" }, 503);
 
