@@ -1,4 +1,5 @@
 ﻿import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,16 +7,29 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { CreditCard, Download, Filter, X } from "lucide-react";
-import { useTransactions } from "@/hooks/useTransactions";
+import { useTransactions, type BankTransaction } from "@/hooks/useTransactions";
 import { useBankConnections } from "@/hooks/useBankConnections";
 
+const MP_STATUS_LABELS: Record<string, string> = {
+  approved: "Aprovado",
+  refunded: "Estornado",
+  charged_back: "Chargeback",
+  cancelled: "Cancelado",
+  in_mediation: "Em disputa",
+};
+
 export default function ConnectTransactions() {
-  const { transactions, summary, loading, loadTransactions, updateStatus } = useTransactions();
+  // "Ver transações" na tela de Bancos abre já filtrado pela conexão.
+  const [searchParams] = useSearchParams();
+  const initialConnectionId = searchParams.get("conexao");
+  const { transactions, summary, loading, loadTransactions, updateStatus } = useTransactions(
+    initialConnectionId ? { bankConnectionId: initialConnectionId } : {}
+  );
   const { connections } = useBankConnections();
   const [filters, setFilters] = useState({
     startDate: "",
     endDate: "",
-    bankConnectionId: "all",
+    bankConnectionId: initialConnectionId ?? "all",
     status: "all",
     minAmount: "",
     maxAmount: "",
@@ -88,6 +102,9 @@ export default function ConnectTransactions() {
       doc: "DOC",
       cheque: "Cheque",
       boleto: "Boleto",
+      credit_card: "Cartão de crédito",
+      debit_card: "Cartão de débito",
+      money: "Dinheiro",
       other: "Outro",
     };
     return methods[method || ""] || method || "-";
@@ -102,6 +119,22 @@ export default function ConnectTransactions() {
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString("pt-BR");
+  };
+
+  // Recebimento do Mercado Pago: o Valor da tabela é o bruto (o que casa com a
+  // venda); taxa e líquido aparecem à parte, nunca no lugar do bruto.
+  const renderMercadoPagoDetails = (tx: BankTransaction) => {
+    if (tx.provider !== "mercado_pago") return null;
+    const parts = [
+      tx.fee_amount != null ? `Taxa ${formatCurrency(tx.fee_amount)}` : null,
+      tx.net_amount != null ? `Líquido ${formatCurrency(tx.net_amount)}` : null,
+      tx.refunded_amount ? `Estornado ${formatCurrency(tx.refunded_amount)}` : null,
+      tx.provider_status ? `MP: ${MP_STATUS_LABELS[tx.provider_status] ?? tx.provider_status}` : null,
+      tx.payer_name ? `Pagador: ${tx.payer_name}` : null,
+      tx.external_reference ? `Ref.: ${tx.external_reference}` : null,
+      tx.external_id ? `ID MP ${tx.external_id}` : null,
+    ].filter(Boolean);
+    return <p className="text-xs text-muted-foreground mt-0.5 whitespace-normal">{parts.join(" · ")}</p>;
   };
 
   return (
@@ -304,7 +337,10 @@ export default function ConnectTransactions() {
                       <TableCell className="capitalize">{tx.transaction_type === "credit" ? "Entrada" : "Saída"}</TableCell>
                       <TableCell className="text-sm">{tx.bank_name}</TableCell>
                       <TableCell className="text-sm">{getMethodLabel(tx.method)}</TableCell>
-                      <TableCell className="text-sm max-w-xs truncate">{tx.description || "-"}</TableCell>
+                      <TableCell className="text-sm max-w-xs">
+                        <p className="truncate">{tx.description || "-"}</p>
+                        {renderMercadoPagoDetails(tx)}
+                      </TableCell>
                       <TableCell>{getStatusBadge(tx.status)}</TableCell>
                       <TableCell className="text-right">
                         <Select value={tx.status} onValueChange={(v) => updateStatus(tx.id, v)}>

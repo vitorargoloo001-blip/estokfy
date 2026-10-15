@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import {
 import {
   AlertCircle, CheckCircle2, Clock, RefreshCw, Plug2, Building2,
   Trash2, RotateCcw, Wifi, WifiOff, ShieldCheck, Upload, FileUp,
-  Webhook, Copy, KeyRound,
+  Webhook, Copy, KeyRound, Wallet, ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePluggyConnection } from "@/hooks/usePluggyConnection";
@@ -72,9 +73,12 @@ export default function ConnectBankConnections() {
     loadConnections, openWidget, syncNow, reconnect, disconnect, removeManualConnection,
     createManualConnection, creatingManual, importStatement, importingStatement,
     createItauDirectConnection, creatingItauDirect, getItauWebhookSecret, regenerateItauWebhookSecret,
+    connectMercadoPago, connectingMercadoPago, syncMercadoPago, syncingMercadoPago,
   } = usePluggyConnection();
 
   const { canManageConnect } = usePermissions();
+  const navigate = useNavigate();
+  const hasMercadoPago = connections.some((c) => c.provider === "mercado_pago");
 
   // Contagem de conciliações/pendências por conexão -- mesma tabela que a
   // tela de Conciliação já usa, só agrupada aqui pra mostrar por banco.
@@ -244,6 +248,12 @@ export default function ConnectBankConnections() {
                 <Webhook className="h-4 w-4 mr-2" />
                 Conectar Itaú direto
               </Button>
+              {!hasMercadoPago && (
+                <Button variant="outline" onClick={connectMercadoPago} disabled={connectingMercadoPago}>
+                  <Wallet className={`h-4 w-4 mr-2 ${connectingMercadoPago ? "animate-pulse" : ""}`} />
+                  {connectingMercadoPago ? "Conectando..." : "Conectar Mercado Pago"}
+                </Button>
+              )}
               <Button onClick={openWidget} disabled={connecting}>
                 {connecting
                   ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Conectando...</>
@@ -326,10 +336,14 @@ export default function ConnectBankConnections() {
         const itemId   = primary.pluggy_external_item_id;
         const isManual = primary.provider === "manual";
         const isItauDirect = primary.provider === "itau_direct";
+        const isMercadoPago = primary.provider === "mercado_pago";
         const isSyncing = syncing[itemId ?? "__all__"] || syncing["__all__"];
+        const isSyncingMp = !!syncingMercadoPago[primary.id];
         const isImporting = !!importingStatement[primary.id];
         const pluggyStatus = primary.pluggy_status ?? primary.status;
-        const isError = !isManual && !isItauDirect && (pluggyStatus === "login_error" || pluggyStatus === "error" || pluggyStatus === "outdated");
+        const isError = isMercadoPago
+          ? primary.status === "error"
+          : !isManual && !isItauDirect && (pluggyStatus === "login_error" || pluggyStatus === "error" || pluggyStatus === "outdated");
 
         return (
           <Card key={primary.pluggy_item_id ?? primary.id} className={isError ? "border-red-200" : ""}>
@@ -358,6 +372,11 @@ export default function ConnectBankConnections() {
                       <Webhook className="h-3 w-3 mr-1" /> Itaú direto (webhook)
                     </Badge>
                   )}
+                  {isMercadoPago && (
+                    <Badge variant="outline" className="text-xs">
+                      <Wallet className="h-3 w-3 mr-1" /> Mercado Pago (direto)
+                    </Badge>
+                  )}
                 </div>
 
                 {/* Ações do item */}
@@ -382,6 +401,26 @@ export default function ConnectBankConnections() {
                         <KeyRound className="h-3.5 w-3.5 mr-1" />
                         Ver webhook
                       </Button>
+                    ) : isMercadoPago ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => syncMercadoPago(primary.id)}
+                          disabled={isSyncingMp}
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isSyncingMp ? "animate-spin" : ""}`} />
+                          {isSyncingMp ? "Sincronizando..." : "Sincronizar agora"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/connect/transacoes?conexao=${primary.id}`)}
+                        >
+                          <ListChecks className="h-3.5 w-3.5 mr-1" />
+                          Ver transações
+                        </Button>
+                      </>
                     ) : isError ? (
                       <Button
                         size="sm"
@@ -464,13 +503,22 @@ export default function ConnectBankConnections() {
                   >
                     <div className="flex items-center gap-3">
                       <div>
-                        <p className="font-medium text-sm">
-                          {ACCOUNT_TYPE_LABELS[conn.account_type] ?? conn.account_type}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {conn.agency ? `Ag. ${conn.agency} · ` : ""}
-                          Cc. {maskAccountNumber(conn.account_number)}
-                        </p>
+                        {conn.provider === "mercado_pago" ? (
+                          <>
+                            <p className="font-medium text-sm">Conta Mercado Pago</p>
+                            <p className="text-xs text-muted-foreground">{conn.account_number}</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-medium text-sm">
+                              {ACCOUNT_TYPE_LABELS[conn.account_type] ?? conn.account_type}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {conn.agency ? `Ag. ${conn.agency} · ` : ""}
+                              Cc. {maskAccountNumber(conn.account_number)}
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">

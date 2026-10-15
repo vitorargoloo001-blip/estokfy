@@ -3,7 +3,19 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
-export type BankTransaction = Database['public']['Functions']['list_bank_transactions']['Returns'][number];
+// Campos de provider acrescentados em 20261015000001_connect_mercadopago_v1.sql.
+// Opcionais para o tipo valer antes e depois de regenerar types.ts.
+export type BankTransaction = Database['public']['Functions']['list_bank_transactions']['Returns'][number] & Partial<{
+  provider: string | null;
+  external_id: string | null;
+  provider_status: string | null;
+  gross_amount: number | null;
+  fee_amount: number | null;
+  net_amount: number | null;
+  refunded_amount: number | null;
+  payer_name: string | null;
+  external_reference: string | null;
+}>;
 
 export interface TransactionSummary {
   total_count: number;
@@ -26,7 +38,7 @@ export interface TransactionFilters {
   maxAmount?: number;
 }
 
-export function useTransactions() {
+export function useTransactions(initialFilters: TransactionFilters = {}) {
   const { profile } = useAuth();
   const [transactions, setTransactions] = useState<BankTransaction[]>([]);
   const [summary, setSummary] = useState<TransactionSummary | null>(null);
@@ -77,7 +89,7 @@ export function useTransactions() {
   };
 
   useEffect(() => {
-    loadTransactions();
+    loadTransactions(initialFilters);
     loadSummary();
   }, [profile?.store_id]);
 

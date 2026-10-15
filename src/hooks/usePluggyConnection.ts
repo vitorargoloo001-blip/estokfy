@@ -375,6 +375,56 @@ export function usePluggyConnection() {
     }
   }, []);
 
+  // ── Mercado Pago direto (provider = mercado_pago, sem agregador) ──
+  const [connectingMercadoPago, setConnectingMercadoPago] = useState(false);
+  const connectMercadoPago = useCallback(async () => {
+    if (!session?.access_token) {
+      toast.error("Sessão inválida. Faça login novamente.");
+      return;
+    }
+    setConnectingMercadoPago(true);
+    try {
+      const result = await callEdgeFunction("mercadopago-connect", {}, session.access_token) as {
+        nickname: string | null;
+      };
+      toast.success(
+        `Mercado Pago conectado${result.nickname ? ` (${result.nickname})` : ""}. ` +
+        "Os pagamentos recebidos a partir de agora entram automaticamente."
+      );
+      await loadConnections();
+    } catch (e) {
+      toast.error("Erro ao conectar o Mercado Pago: " + String(e));
+    } finally {
+      setConnectingMercadoPago(false);
+    }
+  }, [session?.access_token, loadConnections]);
+
+  const [syncingMercadoPago, setSyncingMercadoPago] = useState<Record<string, boolean>>({});
+  const syncMercadoPago = useCallback(async (connectionId: string) => {
+    if (!session?.access_token) return;
+    setSyncingMercadoPago((s) => ({ ...s, [connectionId]: true }));
+    try {
+      const result = await callEdgeFunction(
+        "mercadopago-sync-payments",
+        { connectionId },
+        session.access_token
+      ) as {
+        results?: Array<{ inserted: number; updated: number; matchResult?: { matches_created?: number } | null }>;
+      };
+      const r = result.results?.[0];
+      const matches = r?.matchResult?.matches_created ?? 0;
+      toast.success(
+        `Mercado Pago sincronizado: ${r?.inserted ?? 0} novo(s), ${r?.updated ?? 0} atualizado(s)` +
+        (matches ? `, ${matches} conciliação(ões) sugerida(s).` : ".")
+      );
+      await loadConnections();
+    } catch (e) {
+      toast.error("Erro ao sincronizar o Mercado Pago: " + String(e));
+    } finally {
+      setSyncingMercadoPago((s) => ({ ...s, [connectionId]: false }));
+    }
+  }, [session?.access_token, loadConnections]);
+
   // ── Importar extrato (OFX/CSV) para uma conexão manual ────────────
   const [importingStatement, setImportingStatement] = useState<Record<string, boolean>>({});
   const importStatement = useCallback(async (
@@ -431,6 +481,10 @@ export function usePluggyConnection() {
     creatingItauDirect,
     getItauWebhookSecret,
     regenerateItauWebhookSecret,
+    connectMercadoPago,
+    connectingMercadoPago,
+    syncMercadoPago,
+    syncingMercadoPago,
     importStatement,
     importingStatement,
     isReady: true,

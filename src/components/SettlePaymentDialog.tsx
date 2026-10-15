@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { CalendarIcon } from 'lucide-react';
+import PixChargeDialog from '@/components/PixChargeDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/api';
 import { toast } from 'sonner';
@@ -39,6 +40,7 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
   const [paidAt, setPaidAt] = useState<Date>(new Date());
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [pixOpen, setPixOpen] = useState(false);
   const submitLock = useRef(false);
 
   useEffect(() => {
@@ -97,6 +99,7 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={next => { if (!submitLock.current) onOpenChange(next); }}>
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Receber pagamento</DialogTitle></DialogHeader>
@@ -111,6 +114,11 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
               <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
               <SelectContent>{METHODS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
             </Select>
+            {method === 'pix' && (
+              <Button variant="outline" className="w-full h-11" onClick={() => setPixOpen(true)} disabled={!saleId}>
+                Gerar QR Code Pix
+              </Button>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Valor recebido</Label>
@@ -155,5 +163,13 @@ export default function SettlePaymentDialog({ saleId, amountPending, open, onOpe
         </div>
       </DialogContent>
     </Dialog>
+    <PixChargeDialog
+      saleId={saleId}
+      amountPending={amountPending}
+      open={pixOpen}
+      onOpenChange={setPixOpen}
+      onPaid={() => { onOpenChange(false); onSettled?.(); }}
+    />
+    </>
   );
 }
