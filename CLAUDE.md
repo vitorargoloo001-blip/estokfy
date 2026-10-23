@@ -22,15 +22,16 @@ Read these before making non-trivial changes — they are detailed, accurate, an
 ## Commands
 
 ```bash
-npm install                 # deps not committed; required before first run
+npm ci                      # install from package-lock.json; required before first run
 npm run dev                 # Vite dev server on :8080 (fixed in vite.config.ts)
 npm run build                # production build -> dist/
-npm run lint                 # eslint .
+npm run lint                 # eslint . — fails on main today (455 errors, 33 warnings, mostly no-explicit-any); check the files you touch instead
 npm run test                  # vitest run (all unit tests, once)
 npm run test:watch            # vitest watch mode
-npx tsc --noEmit -p .         # typecheck without emitting (no separate npm script for this)
-npx vitest run path/to/file.test.ts   # single unit test file
-npx playwright test path/to/file.spec.ts   # single e2e test (uses lovable-agent-playwright-config)
+npm run typecheck           # tsc --noEmit -p tsconfig.app.json (root tsconfig.json has "files": [], so `tsc -p .` checks nothing; 3 errors in PixChargeDialog.tsx on main today)
+npx vitest run src/lib/reports.test.ts          # single unit test file
+npx vitest run -t "name fragment"               # single test by name (scope with a file path to be faster)
+# No e2e run on main: playwright.config.ts is still the Lovable stub and e2e/ exists only in the unpublished 26/09 review.
 ```
 
 Supabase (project ref `aimasistzxghumuxxuaw`, linked via `supabase link --project-ref aimasistzxghumuxxuaw`):
@@ -42,6 +43,9 @@ supabase functions deploy --use-api                 # deploy all functions
 supabase functions logs <name>
 supabase gen types typescript --linked > src/integrations/supabase/types.ts   # regenerate types after schema changes
 ```
+
+supabase db query --linked -f file.sql          # runs against PRODUCTION; regression suites in supabase/tests/ wrap themselves in BEGIN … ROLLBACK — keep any ad-hoc SQL read-only or wrapped the same way
+deno check --no-lock supabase/functions/<name>/index.ts   # type-check one Edge Function (README has the full-tree PowerShell form)
 
 `supabase login` requires a real interactive terminal (fails with `LegacyLoginMissingTokenError` inside a non-TTY agent shell) — if not authenticated, ask the user to run it themselves in their own terminal window.
 
@@ -63,7 +67,17 @@ Two independent gating layers on top of RLS:
 
 Super Admin (`/super-admin/*`) is a fully separate route tree gated by `is_super_admin()` (checks `system_admins` table by email), independent of both role and module gating.
 
-`src/integrations/supabase/client.ts` and `types.ts` are auto-generated — never hand-edit; regenerate types with the command above after any schema change. Same for `supabase/config.toml`.
+`src/integrations/supabase/client.ts` and `types.ts` are auto-generated — never hand-edit; regenerate types with the command above after any schema change. `supabase/config.toml` should not be trusted for the project id: its `project_id` is stale (`fkmogaunoraeyxgpxxjq`). The linked project lives in `supabase/.temp/project-ref` (`aimasistzxghumuxxuaw`).
+
+**Frontend request paths.** Reads and RLS-protected writes go straight through the `supabase` client. Money- and stock-moving operations call Edge Functions through `invokeEdgeFunction` in `src/lib/api.ts` (15 s timeout, one retry, in-flight dedup). Server error codes reach the user through the `BUSINESS_ERRORS` map in that file, so a new code like `sem_permissao_para_vender` needs an entry there or users see a generic message.
+
+**Route gating in `App.tsx`** (`ProtectedRoutes`), in order: auth/bootstrap loading → no session (`/login`) → `needsPayment` (`/verificacao-pagamento`) → `!accessEnabled` (`/acesso-suspenso`). Super admins bypass the last two. Every page is `lazy`-loaded.
+
+**Edge Function conventions.** Deno (`Deno.serve`, `esm.sh` imports). The sales functions (`sales-create`, `sales-settle-payment`, `sales-settle-items-payment`) require an `Idempotency-Key` header and answer 400 `payload_invalido` without it. Code shared between functions lives in `supabase/functions/_shared/`.
+
+**Reports pipeline.** `reports-detailed` (called by `src/pages/Reports.tsx`), `reports-summary` and `reports-ai-analysis` all build on `loadDetailedReport` in `supabase/functions/_shared/detailed-report.ts`. Change aggregation there, not in each function. `src/test/reportEdgeHarness.ts` runs the real function code with the database stubbed, and `src/lib/reports.test.ts` uses it.
+
+**Service worker and leftovers.** `src/main.tsx` unregisters any service worker, so offline support is only the IndexedDB queue, with no app-shell cache. `lovable-tagger` (in `vite.config.ts`, dev mode only) and the `.lovable/` and `.netlify/` folders are leftovers from earlier hosting; production is Cloudflare Pages.
 
 Offline-first: `src/lib/offlineDb.ts` (IndexedDB queue via `idb`) + `src/lib/syncEngine.ts` (replay on reconnect) + `OfflineContext` (online/offline + pending-sync status). Mutations made while offline are queued and flushed through the same edge-function/RPC path once connectivity returns. `addToSyncQueue` currently has zero callers anywhere in `src/` — the queue plumbing exists but nothing enqueues a mutation into it yet, so don't assume any write path is actually offline-safe without checking first.
 
