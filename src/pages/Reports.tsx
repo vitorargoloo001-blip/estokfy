@@ -597,17 +597,6 @@ export default function Reports() {
       afterTable();
     }
 
-    if (data.stock.low_stock.length) {
-      section('Produtos com estoque baixo / sem estoque');
-      autoTable(doc, {
-        startY: y + 4, theme: 'striped',
-        head: [['Produto', 'Estoque', 'Mínimo']],
-        body: data.stock.low_stock.map(p => [p.name, String(p.on_hand), String(p.minimum_stock)]),
-        headStyles: { fillColor: [220, 38, 38] }, styles: { fontSize: 9 },
-      });
-      afterTable();
-    }
-
     const expCats = Object.entries(data.finance.expense_by_category);
     const incCats = Object.entries(data.finance.income_by_category);
     if (expCats.length || incCats.length) {
