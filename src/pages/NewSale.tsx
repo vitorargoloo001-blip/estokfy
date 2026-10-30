@@ -42,6 +42,9 @@ const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'pending', label: 'A prazo / Pendente' },
 ];
 
+// Mesma regra da tela de Clientes.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function NewSale() {
   const { session, user, profile } = useAuth();
   const navigate = useNavigate();
@@ -272,6 +275,27 @@ export default function NewSale() {
   // O que ainda não entrou no caixa ao registrar: a prazo + PIX QR Code aguardando pagamento.
   const awaitingSum = pendingSum + pixQrSum;
 
+  // PIX QR Code exige e-mail do cliente. Se o cadastro não tiver, a vendedora
+  // informa aqui e ele é salvo no cliente ao finalizar. undefined = não consultado.
+  const pixQrSelected = payments.some(p => p.method === 'pix_qr');
+  const selectedCustomerId = customerId && customerId !== 'none' ? customerId : null;
+  const [pixCustomerEmail, setPixCustomerEmail] = useState<string | null | undefined>(undefined);
+  const [pixEmailDraft, setPixEmailDraft] = useState('');
+  useEffect(() => {
+    setPixEmailDraft('');
+    if (!pixQrSelected || !selectedCustomerId) { setPixCustomerEmail(undefined); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('customers')
+        .select('email')
+        .eq('id', selectedCustomerId)
+        .maybeSingle();
+      if (!cancelled) setPixCustomerEmail(data?.email?.trim() || null);
+    })();
+    return () => { cancelled = true; };
+  }, [pixQrSelected, selectedCustomerId]);
+
   // Mantém os pagamentos acompanhando o total quando desconto, frete ou
   // quantidade mudam. A última linha absorve a diferença — mesma regra do
   // botão "Ajustar pagamento", para o comportamento ser previsível.
@@ -404,7 +428,21 @@ export default function NewSale() {
         .eq('id', resolvedCustomerId)
         .maybeSingle();
       if (!pixCustomer?.email?.trim()) {
-        toast.error('Para cobrar por PIX QR Code, cadastre o e-mail do cliente.'); return;
+        const email = pixEmailDraft.trim();
+        if (!email) { toast.error('Para cobrar por PIX QR Code, informe o e-mail do cliente.'); return; }
+        if (!EMAIL_RE.test(email)) { toast.error('E-mail do cliente inválido.'); return; }
+        // .select() confirma que a linha foi gravada: sem isso, uma recusa
+        // silenciosa só apareceria depois, com a venda já registrada.
+        const { data: saved, error: emailErr } = await supabase
+          .from('customers')
+          .update({ email })
+          .eq('id', resolvedCustomerId)
+          .select('id');
+        if (emailErr || !saved?.length) {
+          toast.error('Não foi possível salvar o e-mail do cliente. Tente de novo ou edite o cadastro em Clientes.');
+          return;
+        }
+        setPixCustomerEmail(email);
       }
     }
 
@@ -783,6 +821,24 @@ export default function NewSale() {
                   <p className="text-xs text-destructive">
                     Valor em crédito excede o disponível ({fmt(customerCredit)}).
                   </p>
+                )}
+                {pixQrSelected && !selectedCustomerId && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Selecione o cliente para cobrar por PIX QR Code.
+                  </p>
+                )}
+                {pixQrSelected && selectedCustomerId && pixCustomerEmail === null && (
+                  <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900 p-3">
+                    <Label htmlFor="pix-customer-email" className="text-xs">E-mail do cliente (obrigatório para o PIX QR Code)</Label>
+                    <Input id="pix-customer-email" type="email" inputMode="email" autoComplete="off"
+                      placeholder="cliente@email.com"
+                      value={pixEmailDraft}
+                      onChange={e => setPixEmailDraft(e.target.value)}
+                      className="h-10" />
+                    <p className="text-[11px] text-muted-foreground">
+                      Fica salvo no cadastro do cliente ao finalizar a venda.
+                    </p>
+                  </div>
                 )}
 
                 {cashSum > 0 && (

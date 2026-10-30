@@ -4,7 +4,12 @@ import { format } from 'date-fns';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import NewSale from './NewSale';
 
-const state = vi.hoisted(() => ({ probeOk: true, email: 'cliente@exemplo.com' as string | null }));
+const state = vi.hoisted(() => ({
+  probeOk: true,
+  email: 'cliente@exemplo.com' as string | null,
+  updateRows: 1,
+  updates: [] as Array<{ table: string; payload: unknown }>,
+}));
 const api = vi.hoisted(() => ({ invoke: vi.fn() }));
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), message: vi.fn() }));
 const auth = vi.hoisted(() => ({
@@ -20,11 +25,14 @@ vi.mock('@/lib/api', () => ({ invokeEdgeFunction: api.invoke, validateUserProfil
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {
   from: (table: string) => {
     let single = false;
+    let updating = false;
     const q: Record<string, unknown> = {};
     for (const name of ['select', 'eq', 'in', 'or', 'order', 'limit', 'is']) q[name] = () => q;
     q.maybeSingle = () => { single = true; return q; };
+    q.update = (payload: unknown) => { updating = true; state.updates.push({ table, payload }); return q; };
     q.then = (resolve: (v: unknown) => void) => {
-      const data = table === 'products' ? (single ? PRODUCT : [PRODUCT])
+      const data = updating ? Array.from({ length: state.updateRows }, () => ({ id: 'cust-1' }))
+        : table === 'products' ? (single ? PRODUCT : [PRODUCT])
         : table === 'customers' ? (single ? { email: state.email } : [])
         : single ? null : [];
       return Promise.resolve({ data, error: null }).then(resolve);
@@ -86,6 +94,8 @@ describe('PIX QR Code na nova venda', () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     state.probeOk = true;
     state.email = 'cliente@exemplo.com';
+    state.updateRows = 1;
+    state.updates = [];
     api.invoke.mockReset();
     api.invoke.mockImplementation(async (fn: string, opts: { body?: { probe?: boolean } }) => {
       if (fn === 'mercadopago-pix-create' && opts.body?.probe) {
@@ -133,16 +143,62 @@ describe('PIX QR Code na nova venda', () => {
     expect(button('Mostrar QR Code')).toBeTruthy();
   });
 
-  it('não registra a venda em QR sem cliente com e-mail', async () => {
+  const emailInput = () => container.querySelector<HTMLInputElement>('#pix-customer-email');
+  const selectPixQrForCustomerWithoutEmail = async () => {
     state.email = null;
     await render();
     await addProduct();
     await setValue(paymentSelect()!, 'pix_qr');
     await click(button('Selecionar cliente'));
+  };
+
+  it('não mostra o campo de e-mail quando o cliente já tem e-mail', async () => {
+    await render();
+    await addProduct();
+    await setValue(paymentSelect()!, 'pix_qr');
+    await click(button('Selecionar cliente'));
+    expect(emailInput()).toBeNull();
+  });
+
+  it('cliente sem e-mail: a vendedora informa ali, o e-mail é salvo no cadastro e a venda é registrada', async () => {
+    await selectPixQrForCustomerWithoutEmail();
+    expect(emailInput()).toBeTruthy();
+
+    await setValue(emailInput()!, '  maria@exemplo.com ');
+    await click(button('Finalizar Venda'));
+
+    expect(state.updates).toEqual([{ table: 'customers', payload: { email: 'maria@exemplo.com' } }]);
+    expect(salesCreateCalls()).toHaveLength(1);
+    expect(container.querySelector('[data-testid="pix-dialog"]')?.textContent).toBe('sale-1|100');
+  });
+
+  it('não registra a venda em QR sem e-mail informado', async () => {
+    await selectPixQrForCustomerWithoutEmail();
+    await click(button('Finalizar Venda'));
+
+    expect(state.updates).toHaveLength(0);
+    expect(salesCreateCalls()).toHaveLength(0);
+    expect(toastMock.error).toHaveBeenCalledWith('Para cobrar por PIX QR Code, informe o e-mail do cliente.');
+  });
+
+  it('não salva nem registra com e-mail inválido', async () => {
+    await selectPixQrForCustomerWithoutEmail();
+    await setValue(emailInput()!, 'maria@exemplo');
+    await click(button('Finalizar Venda'));
+
+    expect(state.updates).toHaveLength(0);
+    expect(salesCreateCalls()).toHaveLength(0);
+    expect(toastMock.error).toHaveBeenCalledWith('E-mail do cliente inválido.');
+  });
+
+  it('não registra a venda se o banco não gravar o e-mail', async () => {
+    await selectPixQrForCustomerWithoutEmail();
+    state.updateRows = 0;
+    await setValue(emailInput()!, 'maria@exemplo.com');
     await click(button('Finalizar Venda'));
 
     expect(salesCreateCalls()).toHaveLength(0);
-    expect(toastMock.error).toHaveBeenCalledWith('Para cobrar por PIX QR Code, cadastre o e-mail do cliente.');
+    expect(toastMock.error).toHaveBeenCalledWith('Não foi possível salvar o e-mail do cliente. Tente de novo ou edite o cadastro em Clientes.');
   });
 
   it('não registra a venda em QR sem cliente', async () => {
