@@ -22,6 +22,7 @@ import { CustomerSearch } from '@/components/CustomerSearch';
 import { useBarcodeScanner, beep } from '@/hooks/useBarcodeScanner';
 import { usePrintSettings } from '@/hooks/usePrintSettings';
 import { printThermalReceipt, type ReceiptData } from '@/lib/receipt';
+import PixChargeDialog from '@/components/PixChargeDialog';
 
 interface Product { id: string; sku: string; name: string; brand: string | null; model: string | null; sale_price: number; on_hand: number; category_name?: string | null; }
 interface SaleItem { product_id: string; product_name: string; qty: number; unit_price: number; available: number; }
@@ -30,6 +31,9 @@ interface PaymentLine { method: string; amount: number; }
 
 const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'pix', label: 'PIX' },
+  // Cobrança com QR Code do Mercado Pago. Vai ao servidor como 'pending' e a
+  // venda é quitada sozinha quando o pagamento cai (mercadopago_pix_apply_status).
+  { value: 'pix_qr', label: 'PIX QR Code' },
   { value: 'cash', label: 'Dinheiro' },
   { value: 'credit_card', label: 'Cartão Crédito' },
   { value: 'debit_card', label: 'Cartão Débito' },
@@ -68,6 +72,25 @@ export default function NewSale() {
   const [searching, setSearching] = useState(false);
   const debouncedSearch = useDebouncedValue(productSearch, 300);
   const [customerCredit, setCustomerCredit] = useState(0);
+
+  // PIX QR Code só aparece quando o Pix do Mercado Pago está habilitado para a loja.
+  const [pixQrEnabled, setPixQrEnabled] = useState(false);
+  const [pixCharge, setPixCharge] = useState<{ saleId: string; amount: number } | null>(null);
+  const [pixOpen, setPixOpen] = useState(false);
+  const [pixPaid, setPixPaid] = useState(false);
+  const handlePixPaid = useCallback(() => setPixPaid(true), []);
+
+  useEffect(() => {
+    if (!storeId) return;
+    let cancelled = false;
+    invokeEdgeFunction<{ enabled: boolean }>('mercadopago-pix-create', {
+      body: { probe: true },
+      dedupKey: 'mercadopago-pix-probe',
+    })
+      .then((res) => { if (!cancelled) setPixQrEnabled(res.enabled === true); })
+      .catch(() => { if (!cancelled) setPixQrEnabled(false); });
+    return () => { cancelled = true; };
+  }, [storeId]);
 
   // Saldo de crédito disponível do cliente selecionado (fidelidade + devolução + troca).
   useEffect(() => {
@@ -245,6 +268,9 @@ export default function NewSale() {
   const pendingSum = payments.filter(p => p.method === 'pending').reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const remaining = Math.max(0, total - paymentsSum);
   const hasPending = pendingSum > 0;
+  const pixQrSum = payments.filter(p => p.method === 'pix_qr').reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  // O que ainda não entrou no caixa ao registrar: a prazo + PIX QR Code aguardando pagamento.
+  const awaitingSum = pendingSum + pixQrSum;
 
   // Mantém os pagamentos acompanhando o total quando desconto, frete ou
   // quantidade mudam. A última linha absorve a diferença — mesma regra do
@@ -359,6 +385,29 @@ export default function NewSale() {
       return;
     }
 
+    // A cobrança Pix é sempre do saldo devedor inteiro da venda, por isso não
+    // dá para misturar com "A prazo". O Mercado Pago exige o e-mail do pagador:
+    // confere antes de registrar, para não deixar venda pendente à toa.
+    if (pixQrSum > 0) {
+      if (cleanPayments.filter(p => p.method === 'pix_qr').length > 1) {
+        toast.error('Use uma única linha de PIX QR Code.'); return;
+      }
+      if (hasPending) {
+        toast.error('PIX QR Code não pode ser combinado com "A prazo / Pendente" na mesma venda.'); return;
+      }
+      if (!resolvedCustomerId) {
+        toast.error('Para cobrar por PIX QR Code, selecione o cliente.'); return;
+      }
+      const { data: pixCustomer } = await supabase
+        .from('customers')
+        .select('email')
+        .eq('id', resolvedCustomerId)
+        .maybeSingle();
+      if (!pixCustomer?.email?.trim()) {
+        toast.error('Para cobrar por PIX QR Code, cadastre o e-mail do cliente.'); return;
+      }
+    }
+
     // Bloqueia data futura
     const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
     if (saleDate.getTime() > todayEnd.getTime()) {
@@ -382,13 +431,13 @@ export default function NewSale() {
       customer_id: resolvedCustomerId,
       discount,
       items: items.map(i => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price })),
-      payments: cleanPayments,
+      payments: cleanPayments.map(p => (p.method === 'pix_qr' ? { ...p, method: 'pending' } : p)),
       // Frete é somado ao total independente do método de entrega (o campo
       // fica sempre visível na tela, mesmo em "Retirada") — só omitimos o
       // delivery quando não há nada a registrar (retirada sem frete), pra
       // não criar uma linha em deliveries pra toda venda balcão comum.
       delivery: (deliveryMethod === 'pickup' && shippingFee <= 0) ? null : { method: deliveryMethod, shipping_fee: shippingFee, delivery_cost: 0 },
-      due_date: hasPending && dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
+      due_date: hasPending && dueDate ? format(dueDate, 'yyyy-MM-dd') : (pixQrSum > 0 ? todayStr : null),
       sale_date: saleDateISO,
       notes: notes.trim() ? notes.trim().slice(0, 1000) : null,
     };
@@ -400,7 +449,13 @@ export default function NewSale() {
         body: payload,
       });
       setSuccess(body.sale_id);
-      toast.success(hasPending ? 'Venda registrada (com pendência)!' : 'Venda registrada!');
+      if (pixQrSum > 0) {
+        setPixCharge({ saleId: body.sale_id, amount: pixQrSum });
+        setPixOpen(true);
+        toast.success('Venda registrada! Mostre o QR Code ao cliente.');
+      } else {
+        toast.success(hasPending ? 'Venda registrada (com pendência)!' : 'Venda registrada!');
+      }
 
       // Auto-print térmico se habilitado nas configurações
       if (printSettings.enabled && printSettings.auto_print && body.sale_id) {
@@ -428,8 +483,8 @@ export default function NewSale() {
               line_total: Number(it.line_total),
             })),
             gross: subtotal, net: total, discount, shipping: shippingFee,
-            amountPaid: paymentsSum - pendingSum, amountPending: pendingSum,
-            paymentStatus: hasPending ? (paymentsSum - pendingSum > 0 ? 'partial' : 'pending') : 'paid',
+            amountPaid: paymentsSum - awaitingSum, amountPending: awaitingSum,
+            paymentStatus: awaitingSum > 0 ? (paymentsSum - awaitingSum > 0 ? 'partial' : 'pending') : 'paid',
             paymentMethods: Array.from(new Set((payRes.data || []).map((p: any) => p.method).filter((m: string) => m !== 'pending'))),
           };
           printThermalReceipt(data, {
@@ -476,6 +531,7 @@ export default function NewSale() {
     setItems([]); setCustomerId(''); setDiscount(0); setShippingFee(0); setCashReceived(0);
     setPayments([{ method: 'pix', amount: 0 }]); setDeliveryMethod('pickup');
     setDueDate(undefined); setSaleDate(new Date()); setNotes(''); setSuccess(null); idempotencyRef.current = null;
+    setPixCharge(null); setPixOpen(false); setPixPaid(false);
     fetchData();
   };
 
@@ -489,10 +545,32 @@ export default function NewSale() {
         <CheckCircle2 className="h-16 w-16 text-emerald-500" />
         <h2 className="text-2xl font-bold">Venda registrada!</h2>
         <p className="text-muted-foreground">ID: {success.slice(0, 8)}...</p>
+        {pixCharge && (pixPaid ? (
+          <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+            Pix de {fmt(pixCharge.amount)} recebido.
+          </p>
+        ) : (
+          <div className="w-full space-y-2 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900 p-3">
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              Aguardando Pix de {fmt(pixCharge.amount)}. A venda é quitada sozinha quando o pagamento cair.
+              Se o cliente não pagar, receba por outro meio em Vendas.
+            </p>
+            <Button variant="outline" className="w-full h-11" onClick={() => setPixOpen(true)}>Mostrar QR Code</Button>
+          </div>
+        ))}
         <div className="flex gap-3 w-full">
           <Button variant="outline" className="flex-1 h-11" onClick={() => navigate('/vendas')}>Ver Vendas</Button>
           <Button className="flex-1 h-11" onClick={handleNewSale}>Nova Venda</Button>
         </div>
+        {pixCharge && (
+          <PixChargeDialog
+            saleId={pixCharge.saleId}
+            amountPending={pixCharge.amount}
+            open={pixOpen}
+            onOpenChange={setPixOpen}
+            onPaid={handlePixPaid}
+          />
+        )}
       </div>
     );
   }
@@ -677,9 +755,9 @@ export default function NewSale() {
                   </p>
                 )}
                 {payments.map((p, idx) => {
-                  const methodOptions = p.method === 'credit' || customerCredit > 0
-                    ? PAYMENT_METHODS
-                    : PAYMENT_METHODS.filter(m => m.value !== 'credit');
+                  const methodOptions = PAYMENT_METHODS.filter(m =>
+                    (m.value !== 'credit' || p.method === 'credit' || customerCredit > 0) &&
+                    (m.value !== 'pix_qr' || p.method === 'pix_qr' || pixQrEnabled));
                   return (
                     <div key={idx} className="flex gap-2 items-center">
                       <Select value={p.method} onValueChange={v => updatePayment(idx, 'method', v)}>

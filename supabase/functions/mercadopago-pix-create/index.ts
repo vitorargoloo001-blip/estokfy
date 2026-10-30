@@ -4,6 +4,8 @@
 // no Mercado Pago (Orders API) e devolve QR Code e copia-e-cola.
 //
 // Body: { saleId: uuid }   Auth: Authorization: Bearer <jwt do usuário>
+//       { probe: true } só responde se o Pix está disponível para este
+//       usuário e loja ({ enabled: true }), sem abrir cobrança.
 // Env: MP_PIX_ACCESS_TOKEN (produção) ou MP_PIX_TEST_ACCESS_TOKEN (teste),
 //      MP_PIX_STORE_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
@@ -30,8 +32,8 @@ Deno.serve(async (req: Request) => {
   const pixStore = Deno.env.get("MP_PIX_STORE_ID");
   if (!token || !pixStore) return json({ error: "Pix pelo Mercado Pago ainda não configurado" }, 503);
 
-  const body = await req.json().catch(() => ({})) as { saleId?: string };
-  if (!body.saleId) return json({ error: "saleId obrigatório" }, 400);
+  const body = await req.json().catch(() => ({})) as { saleId?: string; probe?: boolean };
+  if (!body.saleId && body.probe !== true) return json({ error: "saleId obrigatório" }, 400);
 
   const supabase = serviceClient();
 
@@ -48,6 +50,7 @@ Deno.serve(async (req: Request) => {
   if (!profile?.store_id) return json({ error: "Loja não encontrada" }, 403);
   if (!PIX_ROLES.includes(profile.role as string)) return json({ error: "Sem permissão para cobrar" }, 403);
   if (profile.store_id !== pixStore) return json({ error: "Pix ainda não habilitado para esta loja" }, 403);
+  if (body.probe === true) return json({ enabled: true });
 
   // 2. Abre a cobrança (valida a venda e o saldo no banco)
   const { data: opened, error: openErr } = await supabase.rpc("mercadopago_pix_begin_charge", {
