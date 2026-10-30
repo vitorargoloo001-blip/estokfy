@@ -74,6 +74,27 @@ normal de conciliação.
 - A venda nunca vira o líquido. Não há lançamento automático de taxa: o núcleo
   financeiro não tem modelo de taxa de adquirente, e isso depende de decisão de produto.
 
+## Conciliação com o Pix gerado pelo Estokfy (2026-10-30)
+
+Migration `20261030000001_connect_matching_pix_e_nome.sql` alterou
+`_connect_run_matching_core` (antes intocado nesta V1):
+
+- **Passe 0:** a cobrança Pix (`mercadopago_pix_charges`) manda o próprio id
+  como `external_reference`. Recebimento com esse `external_reference` liga ao
+  pagamento criado pela cobrança (`idempotency_key = 'mercadopago:' ||
+  mp_payment_id`) com nota 100. **Não confirmado ainda** que o
+  `external_reference` da order chega ao `/v1/payments` importado — conferir no
+  primeiro Pix real; se não chegar, o pagamento continua nos passes 1-3.
+- **Passes 1-3:** desempate pelo nome do pagador (`payer_name`, ou a descrição)
+  contra o nome do cliente da venda (`_connect_payer_matches_customer`: primeiro
+  e último nome como palavras inteiras, sem acento). Pagamentos do Pix do
+  Estokfy ficam por último nesses passes. Notas não mudaram.
+- Teste: `supabase/tests/connect_matching_regression_tests.sql`.
+
+Na tela de Nova Venda, "PIX QR Code" (só para a loja de `MP_PIX_STORE_ID`)
+registra essa parte como pendente com vencimento hoje e abre a cobrança. Exige
+cliente com e-mail (o Mercado Pago exige `payer.email`).
+
 ## Dados pessoais
 
 `raw_data` é uma lista branca (ids, status, valores, datas, taxas, método,
@@ -95,8 +116,11 @@ conciliação — o próprio Mercado Pago restringe o uso desses dados a isso.
    (`pg_available_extensions`).
 2. Confirmar que `bank_transactions.bank_reference` tem UNIQUE.
 3. Ensaiar as migrations em `BEGIN … ROLLBACK` contra produção (padrão do projeto).
-4. Deploy: `mercadopago-connect` e `mercadopago-sync-payments` com `--use-api`;
-   `mercadopago-webhook` com `--use-api --no-verify-jwt`.
+4. Deploy: `mercadopago-connect` com `--use-api`; `mercadopago-sync-payments`
+   e `mercadopago-webhook` com `--use-api --no-verify-jwt`. A sincronização
+   precisa do `--no-verify-jwt` porque o cron não manda JWT, só `x-cron-secret`;
+   com `verify_jwt` ligado o gateway recusa com 401 antes de a função rodar.
+   O `supabase/config.toml` já fixa isso por função.
 5. Regenerar `src/integrations/supabase/types.ts` com `supabase gen types`.
 
 ## Testes

@@ -1,1 +1,12 @@
 project_id = "fkmogaunoraeyxgpxxjq"
+
+# Chamadas sem JWT de usuário: cron (x-cron-secret) e webhooks do Mercado
+# Pago (x-signature). Cada função valida a origem por conta própria.
+[functions.mercadopago-sync-payments]
+verify_jwt = false
+
+[functions.mercadopago-webhook]
+verify_jwt = false
+
+[functions.mercadopago-pix-webhook]
+verify_jwt = false
