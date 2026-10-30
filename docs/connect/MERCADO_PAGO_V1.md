@@ -95,6 +95,31 @@ Na tela de Nova Venda, "PIX QR Code" (só para a loja de `MP_PIX_STORE_ID`)
 registra essa parte como pendente com vencimento hoje e abre a cobrança. Exige
 cliente com e-mail (o Mercado Pago exige `payer.email`).
 
+## Conciliação automática (2026-10-30)
+
+Migration `20261030000002_connect_conciliacao_automatica.sql`. Com a automação
+"Conciliação Automática" ativa (Connect → Automações, `min_confidence`, padrão
+85), `_connect_run_matching_core` termina chamando `_connect_auto_confirm`:
+toda sugestão pendente com nota ≥ mínimo é confirmada sem clique, a cada
+execução do motor (sincronização do Mercado Pago a cada 10 min, webhooks,
+importação de extrato, tick diário, "rodar agora").
+
+- Sugestão com pagamento (passes 0-3): só confirma e marca o recebimento como
+  conciliado, igual a `confirm_reconciliation`.
+- Venda a prazo sem pagamento (passe 4): quita a venda por
+  `_connect_settle_sale_system` — cópia de `settle_sale_payment` sem exigir
+  usuário logado. **Mudança na regra de quitação precisa ser espelhada lá.**
+- Quitação que falhar (venda quitada por fora, valor maior que o saldo) deixa
+  a sugestão pendente para revisão manual.
+- Cada lote confirmado gera log em `connect_system_logs` e notificação interna.
+  `confirmed_by` fica nulo e `notes` diz "Confirmada automaticamente (nota X,
+  mínimo Y)".
+- Notas: passe 0 = 100, passe 1 = 95-100, passe 4 = 90-97, passe 2 = 70-88,
+  passe 3 = 40-69. Com 85, só a parte de cima do passe 2 (diferença de valor
+  ~1,5% e data até 1 dia) entra; passe 3 nunca.
+- O botão "Executar agora" (`run-connect-automations`) usa a mesma função.
+- Teste: `supabase/tests/connect_auto_confirm_regression_tests.sql`.
+
 ## Dados pessoais
 
 `raw_data` é uma lista branca (ids, status, valores, datas, taxas, método,

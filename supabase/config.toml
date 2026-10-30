@@ -10,3 +10,7 @@ verify_jwt = false
 
 [functions.mercadopago-pix-webhook]
 verify_jwt = false
+
+# Valida por conta própria: x-internal-secret ou JWT de usuário dono da loja.
+[functions.run-connect-automations]
+verify_jwt = false

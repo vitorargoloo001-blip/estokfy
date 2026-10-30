@@ -175,39 +175,24 @@ Deno.serve(async (req) => {
 // ── Execuções por tipo ────────────────────────────────────────────────
 
 async function runAutoReconciliation(supabase: ReturnType<typeof createClient>, auto: any, runId: string, storeId: string) {
-  const minScore = Number(auto.config?.min_confidence ?? 85);
+  const configured = Number(auto.config?.min_confidence ?? 85);
+  const minScore = Number.isFinite(configured) ? configured : 85;
   await log(supabase, runId, storeId, "info", `Rodando conciliação automática com score mínimo ${minScore}`);
 
-  const { data, error } = await supabase.rpc("connect_run_matching", { p_store_id: storeId });
+  // Com a automação ativa, o próprio motor já confirma (e notifica) o que tiver
+  // nota suficiente. A segunda chamada cobre a execução manual de uma automação
+  // desligada. Migration 20261030000002.
+  const { data: matching, error } = await supabase.rpc("_connect_run_matching_core", { p_store_id: storeId });
   if (error) throw new Error(error.message);
+  const { data: manual, error: confirmErr } = await supabase.rpc("_connect_auto_confirm", {
+    p_store_id: storeId,
+    p_min_score: minScore,
+  });
+  if (confirmErr) throw new Error(confirmErr.message);
 
-  const matched = Array.isArray(data) ? data.filter((m: any) => (m.confidence_score ?? 0) >= minScore) : [];
-
-  // Confirmar matches de alta confiança automaticamente
-  let confirmed = 0;
-  for (const match of matched) {
-    const { error: confirmErr } = await supabase.rpc("confirm_reconciliation", {
-      p_match_id: match.id,
-      p_store_id: storeId,
-    });
-    if (!confirmErr) confirmed++;
-  }
-
-  if (confirmed > 0) {
-    await supabase.rpc("create_connect_notification", {
-      p_store_id: storeId,
-      p_type: "auto_reconciliation",
-      p_title: `⚡ ${confirmed} transação(ões) conciliada(s) automaticamente`,
-      p_body: `A conciliação automática confirmou ${confirmed} match(es) com score ≥${minScore}.`,
-      p_severity: "info",
-      p_channel: "internal",
-      p_automation_id: auto.id,
-      p_run_id: runId,
-      p_metadata: { confirmed, min_score: minScore },
-    });
-  }
-
-  return { result: { confirmed, min_score: minScore }, itemsAffected: confirmed };
+  const confirmed = Number(matching?.auto_confirm?.confirmed ?? 0) + Number(manual?.confirmed ?? 0);
+  const settled = Number(matching?.auto_confirm?.settled ?? 0) + Number(manual?.settled ?? 0);
+  return { result: { confirmed, settled, min_score: minScore }, itemsAffected: confirmed };
 }
 
 async function runDivergenceAlert(supabase: ReturnType<typeof createClient>, auto: any, runId: string, storeId: string) {
