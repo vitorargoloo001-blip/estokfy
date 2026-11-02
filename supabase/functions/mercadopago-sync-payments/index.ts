@@ -74,7 +74,6 @@ async function syncConnection(
     connectionId: conn.id, storeId: conn.store_id,
     inserted: 0, updated: 0, skipped: 0, partial: false, matchResult: null,
   };
-  let anyMatchable = false;
   let lastSeenUpdated: string | null = null;
   let offset = 0;
 
@@ -90,7 +89,6 @@ async function syncConnection(
       if (r.isNew) summary.inserted++;
       else if (r.action.startsWith("skipped")) summary.skipped++;
       else summary.updated++;
-      if (r.matchable) anyMatchable = true;
       if (payment.date_last_updated) lastSeenUpdated = payment.date_last_updated;
     }
 
@@ -123,7 +121,10 @@ async function syncConnection(
     p_total_transactions: count ?? null,
   });
 
-  if (anyMatchable) summary.matchResult = await runMatching(supabase, conn.store_id);
+  // Roda sempre, não só quando chega recebimento novo: uma venda registrada
+  // depois do Pix chegar só ganha par (e confirmação automática) numa nova
+  // execução do motor.
+  summary.matchResult = await runMatching(supabase, conn.store_id);
 
   if (summary.inserted > 0 || summary.updated > 0 || source === "user") {
     await connectLog(

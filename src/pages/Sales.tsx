@@ -25,6 +25,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useConnectModuleAccess } from '@/hooks/useConnectModuleAccess';
 
 const PAGE_SIZE = 20;
+const BANK_VERIFIABLE_METHODS = ['pix', 'card', 'credit_card', 'debit_card'];
 
 export default function Sales() {
   const { profile } = useAuth();
@@ -56,7 +57,7 @@ export default function Sales() {
     if (!profile) return;
     setLoading(true);
     const showRefunded = status === 'refunded';
-    let query = supabase.from('sales').select('*, customers(name), profiles!sales_created_by_fkey(full_name), payments(method, amount, reconciliation_matches(status, confidence_score))', { count: 'exact' }).eq('store_id', profile.store_id);
+    let query = supabase.from('sales').select('*, customers(name), profiles!sales_created_by_fkey(full_name), payments(id, method, amount)', { count: 'exact' }).eq('store_id', profile.store_id);
     if (!showRefunded) query = query.is('deleted_at', null);
     if (dateFrom) query = query.gte('created_at', dateFrom);
     if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59');
@@ -72,7 +73,19 @@ export default function Sales() {
       const q = debouncedClientSearch.toLowerCase();
       filtered = filtered.filter(s => (s.customers as any)?.name?.toLowerCase().includes(q));
     }
-    setSales(filtered);
+    // Status de conciliação vem por RPC: a vendedora não lê reconciliation_matches
+    // (RLS), só o status de cada pagamento da própria loja.
+    const paymentIds = filtered.flatMap(s => ((s.payments || []) as Array<{ id: string; method: string }>)
+      .filter(p => BANK_VERIFIABLE_METHODS.includes(p.method)).map(p => p.id));
+    let bankStatus: Record<string, string> = {};
+    if (paymentIds.length) {
+      const { data: rows } = await supabase.rpc('get_payments_bank_status', { p_payment_ids: paymentIds });
+      bankStatus = Object.fromEntries((rows || []).map(r => [r.payment_id, r.status]));
+    }
+    setSales(filtered.map(s => ({
+      ...s,
+      payments: ((s.payments || []) as Array<{ id: string }>).map(p => ({ ...p, bank_status: bankStatus[p.id] })),
+    })));
     setTotal(count || 0);
     setLoading(false);
   }, [profile, dateFrom, dateTo, status, page, debouncedClientSearch, debouncedNotesSearch, sellerId]);
@@ -94,15 +107,14 @@ export default function Sales() {
     return PM_LABEL[top.method] || top.method;
   };
 
-  const BANK_VERIFIABLE_METHODS = ['pix', 'card', 'credit_card', 'debit_card'];
   const bankStatusBadge = (s: any): { label: string; cls: string } | null => {
     if (!hasConnectAccess) return null;
-    type PaymentRow = { method: string; reconciliation_matches?: Array<{ status: string; confidence_score: number }> };
+    type PaymentRow = { method: string; bank_status?: string };
     const payments = (s.payments || []) as PaymentRow[];
     const verifiable = payments.filter(p => BANK_VERIFIABLE_METHODS.includes(p.method));
     if (!verifiable.length) return null;
 
-    const statuses = verifiable.map(p => (p.reconciliation_matches || [])[0]?.status ?? 'awaiting');
+    const statuses = verifiable.map(p => p.bank_status ?? 'awaiting');
     if (statuses.includes('disputed')) return { label: 'Divergente', cls: 'bg-destructive/15 text-destructive' };
     if (statuses.every(st => st === 'confirmed')) return { label: 'Confirmado pelo banco', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' };
     return { label: 'Aguardando banco', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' };
