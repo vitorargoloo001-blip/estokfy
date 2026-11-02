@@ -2812,6 +2812,85 @@ export type Database = {
           },
         ]
       }
+      mercadopago_pix_charges: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          expires_at: string | null
+          id: string
+          last_error: string | null
+          mp_order_id: string | null
+          mp_payment_id: string | null
+          paid_at: string | null
+          qr_code: string | null
+          qr_code_base64: string | null
+          sale_id: string
+          status: string
+          store_id: string
+          ticket_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          last_error?: string | null
+          mp_order_id?: string | null
+          mp_payment_id?: string | null
+          paid_at?: string | null
+          qr_code?: string | null
+          qr_code_base64?: string | null
+          sale_id: string
+          status?: string
+          store_id: string
+          ticket_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          last_error?: string | null
+          mp_order_id?: string | null
+          mp_payment_id?: string | null
+          paid_at?: string | null
+          qr_code?: string | null
+          qr_code_base64?: string | null
+          sale_id?: string
+          status?: string
+          store_id?: string
+          ticket_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mercadopago_pix_charges_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mercadopago_pix_charges_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mercadopago_pix_charges_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       module_audit_logs: {
         Row: {
           action: string

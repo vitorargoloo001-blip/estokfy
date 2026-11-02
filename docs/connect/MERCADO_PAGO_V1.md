@@ -133,6 +133,14 @@ importação de extrato, tick diário, "rodar agora").
 - Pix recebido por chave (`point_of_interaction_type = PSP_TRANSFER`) chega sem
   `payer_name`: desempate por nome e passe 4 (venda a prazo pelo nome) não
   funcionam para esses recebimentos.
+- Venda que não virava "Pago" com o Pix já recebido: a cobrança do QR Code só
+  era consultada com a tela do Pix aberta. Se a vendedora fechava a tela antes
+  do pagamento, a cobrança e a venda ficavam pendentes para sempre (caso ABADE,
+  R$ 50,00, 30/10). Agora `mercadopago-pix-reconcile` roda pelo cron a cada
+  5 minutos (migration `20261102000002`) e consulta todas as cobranças abertas,
+  pelo mesmo caminho do webhook. Publicar com `--no-verify-jwt`.
+- Tipos: `mercadopago_pix_charges` declarada em `types.ts`. Antes, `npx tsc`
+  acusava 3 erros em `PixChargeDialog.tsx`.
 
 ## Dados pessoais
 
