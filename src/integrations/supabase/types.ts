@@ -3427,6 +3427,7 @@ export type Database = {
           category_id: string | null
           cost_price: number
           created_at: string
+          external_id: string | null
           id: string
           image_path: string | null
           is_active: boolean
@@ -3445,6 +3446,7 @@ export type Database = {
           category_id?: string | null
           cost_price?: number
           created_at?: string
+          external_id?: string | null
           id?: string
           image_path?: string | null
           is_active?: boolean
@@ -3463,6 +3465,7 @@ export type Database = {
           category_id?: string | null
           cost_price?: number
           created_at?: string
+          external_id?: string | null
           id?: string
           image_path?: string | null
           is_active?: boolean
@@ -6829,6 +6832,10 @@ export type Database = {
           p_start: string
           p_store_id: string
         }
+        Returns: Json
+      }
+      pixel_sync_products: {
+        Args: { p_products: Json; p_store_id: string }
         Returns: Json
       }
       process_exchange_atomic: {
