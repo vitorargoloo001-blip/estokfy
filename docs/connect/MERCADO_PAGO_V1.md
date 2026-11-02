@@ -120,6 +120,20 @@ importação de extrato, tick diário, "rodar agora").
 - O botão "Executar agora" (`run-connect-automations`) usa a mesma função.
 - Teste: `supabase/tests/connect_auto_confirm_regression_tests.sql`.
 
+## Ajustes de 2026-11-02
+
+- `mercadopago-sync-payments` roda o motor em **toda** sincronização (antes, só
+  quando chegava recebimento novo). Venda registrada depois do Pix chegar ganha
+  par em até 10 min.
+- Tela de Vendas: o status "Confirmado pelo banco / Aguardando banco" vem de
+  `get_payments_bank_status` (migration `20261102000001`). A política de
+  `reconciliation_matches` não inclui `sales`; antes, para a vendedora, toda
+  venda em Pix ficava "Aguardando banco". A função devolve só o status, da loja
+  de quem chama. Teste: `src/pages/Sales.bankstatus.test.tsx`.
+- Pix recebido por chave (`point_of_interaction_type = PSP_TRANSFER`) chega sem
+  `payer_name`: desempate por nome e passe 4 (venda a prazo pelo nome) não
+  funcionam para esses recebimentos.
+
 ## Dados pessoais
 
 `raw_data` é uma lista branca (ids, status, valores, datas, taxas, método,

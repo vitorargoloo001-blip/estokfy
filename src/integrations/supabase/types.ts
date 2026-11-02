@@ -6210,6 +6210,13 @@ export type Database = {
           supplier_name: string
         }[]
       }
+      get_payments_bank_status: {
+        Args: { p_payment_ids: string[] }
+        Returns: {
+          payment_id: string
+          status: string
+        }[]
+      }
       get_payment_behavior: {
         Args: { p_days?: number; p_store_id: string }
         Returns: {
