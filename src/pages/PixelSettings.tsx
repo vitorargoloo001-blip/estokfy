@@ -11,11 +11,12 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import PixelProductsPanel from '@/components/PixelProductsPanel';
 import { toast } from 'sonner';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Code, Copy, Check, Plus, RefreshCw, Eye, EyeOff, Loader2, Wifi, WifiOff,
-  CheckCircle2, XCircle, Clock, AlertTriangle, Zap, Globe, Shield, Activity,
+  CheckCircle2, XCircle, Clock, AlertTriangle, Zap, Globe, Shield, Activity, Package,
 } from 'lucide-react';
 
 const BASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -259,10 +260,11 @@ export default function PixelSettings() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className={isMobile ? 'w-full grid grid-cols-3' : ''}>
+        <TabsList className={isMobile ? 'w-full grid grid-cols-4' : ''}>
           <TabsTrigger value="config"><Shield className="h-4 w-4 mr-1" /> Configuração</TabsTrigger>
           <TabsTrigger value="snippet"><Code className="h-4 w-4 mr-1" /> Instalação</TabsTrigger>
           <TabsTrigger value="events"><Activity className="h-4 w-4 mr-1" /> Eventos</TabsTrigger>
+          <TabsTrigger value="products"><Package className="h-4 w-4 mr-1" /> Produtos</TabsTrigger>
         </TabsList>
 
         {/* Config Tab */}
@@ -463,6 +465,10 @@ export default function PixelSettings() {
               </Table>
             </Card>
           )}
+        </TabsContent>
+        {/* Products Tab: envios de produtos feitos pela API da loja online */}
+        <TabsContent value="products" className="space-y-4 mt-4">
+          <PixelProductsPanel storeId={pixel.store_id} />
         </TabsContent>
       </Tabs>
     </div>
