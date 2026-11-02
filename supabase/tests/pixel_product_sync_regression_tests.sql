@@ -77,6 +77,8 @@ BEGIN
       (SELECT error FROM (SELECT jsonb_array_elements(r->'results')->>'error' AS error, jsonb_array_elements(r->'results')->>'action' AS action) x WHERE action='error' AND error LIKE 'preco_invalido%' LIMIT 1), 'preco_invalido'),
     ('SKU de outro produto da loja online: não sobrescreve',
       (SELECT error FROM (SELECT jsonb_array_elements(r->'results')->>'error' AS error, jsonb_array_elements(r->'results')->>'action' AS action) x WHERE action='error' AND error LIKE 'sku_ja_ligado%' LIMIT 1), 'sku_ja_ligado_a_outro_produto_da_loja_online'),
+    ('auditoria guarda o motivo de cada erro',
+      (SELECT jsonb_array_length(after_json->'errors_detail')::text || ' ' || (after_json->'errors_detail'->0->>'external_id' IS NULL)::text FROM pg_temp.audit_logs WHERE action='pixel_products_sync' LIMIT 1), '5 true'),
     ('auditoria do lote',
       (SELECT count(*)::text || ' ' || max(after_json->>'created') FROM pg_temp.audit_logs WHERE action='pixel_products_sync'), '1 2');
 

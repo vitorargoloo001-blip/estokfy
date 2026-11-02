@@ -9,6 +9,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Check, Copy, Zap, Code, Globe, Shield, ArrowRight, BookOpen, Terminal, AlertTriangle, ChevronLeft, Menu } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { PIXEL_PRODUCT_ERRORS } from "@/components/PixelProductsPanel";
 
 const BASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
@@ -61,6 +62,7 @@ const NAV_ITEMS = [
   { id: "payloads", label: "Payloads" },
   { id: "respostas", label: "Respostas" },
   { id: "idempotencia", label: "Idempotência" },
+  { id: "produtos", label: "Produtos" },
   { id: "exemplos", label: "Exemplos" },
   { id: "faq", label: "FAQ" },
 ];
@@ -558,6 +560,71 @@ ctrlx("purchase_approved", {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Produtos */}
+            <SectionTitle id="produtos">Sincronização de produtos</SectionTitle>
+            <p className="text-muted-foreground mb-4 leading-relaxed">
+              A loja online pode enviar o catálogo para o Estokfy. Cada produto entra no cadastro
+              da mesma forma que o cadastro manual: mesma lista de produtos, mesmas categorias e
+              estoque inicial. Use as mesmas credenciais do pixel (<code className="bg-muted px-1.5 py-0.5 rounded text-xs">x-pixel-id</code> e{" "}
+              <code className="bg-muted px-1.5 py-0.5 rounded text-xs">x-pixel-key</code>).
+            </p>
+
+            <CopyBlock language="bash" code={`curl -X POST "${BASE_URL}/functions/v1/pixel-products" \\
+  -H "Content-Type: application/json" \\
+  -H "x-pixel-id: SEU_PIXEL_ID" \\
+  -H "x-pixel-key: SEU_SECRET_KEY" \\
+  -d '{
+    "products": [
+      {
+        "external_id": "PROD-123",
+        "name": "Camiseta Básica",
+        "sku": "CAM-BAS",
+        "category": "Roupas",
+        "sale_price": 59.9,
+        "cost_price": 20,
+        "stock": 10,
+        "variations": [
+          { "external_id": "VAR-P-AZ", "sku": "CAM-P-AZ", "attributes": { "tamanho": "P", "cor": "Azul" }, "stock": 5 }
+        ]
+      }
+    ]
+  }'`} />
+
+            <SubSection>Regras</SubSection>
+            <ul className="list-disc pl-6 space-y-2 text-muted-foreground mb-6">
+              <li><strong className="text-foreground">Identificação:</strong> <code className="bg-muted px-1.5 py-0.5 rounded text-xs">external_id</code> (id na loja online). Sem ele, o SKU; sem SKU, o código de barras. Reenviar não duplica.</li>
+              <li><strong className="text-foreground">Estoque:</strong> o campo <code className="bg-muted px-1.5 py-0.5 rounded text-xs">stock</code> vale só na criação. Depois, o estoque é controlado pelo Estokfy (vendas, entradas e ajustes).</li>
+              <li><strong className="text-foreground">Campo ausente</strong> não apaga o que já existe no produto.</li>
+              <li><strong className="text-foreground">Variações</strong> viram produtos separados, herdando marca, categoria e preços do produto principal.</li>
+              <li><strong className="text-foreground">Conflito:</strong> SKU ou código de barras já usados por outro produto da loja online não são alterados; o item volta com erro.</li>
+              <li><strong className="text-foreground">Fotos</strong> não são importadas.</li>
+              <li><strong className="text-foreground">Limite:</strong> 200 produtos por chamada (500 depois de expandir as variações).</li>
+            </ul>
+
+            <SubSection>Resposta e erros por item</SubSection>
+            <p className="text-muted-foreground mb-4 leading-relaxed">
+              A resposta traz um item por produto enviado. Quem tiver erro aparece com o motivo, e o
+              mesmo histórico fica em <strong className="text-foreground">Estokfy Pixel → Produtos</strong>.
+            </p>
+            <div className="overflow-x-auto mb-6">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-3 font-medium">Motivo</th>
+                    <th className="text-left py-2 px-3 font-medium">O que significa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {PIXEL_PRODUCT_ERRORS.map(({ code, text }) => (
+                    <tr key={code} className="border-b">
+                      <td className="py-2 px-3"><code className="bg-muted px-1.5 py-0.5 rounded text-xs">{code}</code></td>
+                      <td className="py-2 px-3 text-muted-foreground">{text}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {/* Exemplos */}
             <SectionTitle id="exemplos">Exemplos Completos</SectionTitle>
