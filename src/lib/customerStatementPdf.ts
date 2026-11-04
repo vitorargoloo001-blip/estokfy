@@ -120,69 +120,45 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
 
   for (const s of sortedSales) {
     const date   = new Date(s.created_at).toLocaleDateString('pt-BR');
-    const due    = s.due_date ? new Date(s.due_date + 'T00:00:00').toLocaleDateString('pt-BR') : '—';
+    const due    = s.due_date ? new Date(s.due_date + 'T00:00:00').toLocaleDateString('pt-BR') : null;
     const status = s.overdue ? 'VENCIDA' : s.payment_status === 'partial' ? 'PARCIAL' : 'PENDENTE';
-    // Só produtos que ainda têm valor a pagar
-    const items  = (s.items || []).filter((it) => it.amount_pending > 0);
+    // Só produtos que ainda têm valor a pagar; venda sem itens vira uma linha única
+    let items = (s.items || []).filter((it) => it.amount_pending > 0);
+    if ((s.items || []).length === 0) {
+      items = [{
+        name: 'Venda sem itens detalhados', qty: 1, unit_price: s.net_total,
+        line_total: s.net_total, amount_paid: s.amount_paid, amount_pending: s.amount_pending,
+      }];
+    }
 
-    checkY(8 + items.length * 5 + 22);
-
-    // Sale header bar
-    doc.setFillColor(237, 242, 250);
-    doc.rect(MARGIN, y - 3, W - MARGIN * 2, 8, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
-    doc.setTextColor(30);
-    doc.text(`Venda #${s.id.slice(0, 8).toUpperCase()} · ${date}`, C_DESC, y);
-    if (s.overdue) doc.setTextColor(200, 30, 30);
-    doc.text(`Venc: ${due}   ${status}`, C_RIGHT, y, { align: 'right' });
-    doc.setTextColor(0);
-    y += 7;
-
-    // Item rows
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
     for (const it of items) {
-      checkY(6);
       const nameLines = (doc.splitTextToSize(it.name, 62) as string[]).slice(0, 2);
-      if (nameLines.length > 1) checkY(10);
+      checkY(5 * nameLines.length + 8);
+      doc.setTextColor(0);
       doc.text(nameLines, C_DESC, y);
       doc.text(date, C_DATE, y, { align: 'right' });
       doc.text(String(it.qty), C_QTY, y, { align: 'right' });
       doc.text(fmt(it.line_total), C_UNIT, y, { align: 'right' });
       doc.setTextColor(22, 163, 74);
       doc.text(fmt(it.amount_paid), C_PAID, y, { align: 'right' });
-      doc.setTextColor(it.amount_pending > 0 ? 200 : 0, it.amount_pending > 0 ? 30 : 0, it.amount_pending > 0 ? 30 : 0);
+      doc.setTextColor(200, 30, 30);
+      doc.setFont('helvetica', 'bold');
       doc.text(fmt(it.amount_pending), C_PEND, y, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
       doc.setTextColor(0);
       y += 5 * nameLines.length;
     }
 
-    // Sale summary
-    checkY(16);
-    doc.setFontSize(7.5); doc.setTextColor(80);
-    doc.text('Total da venda:', 102, y, { align: 'right' });
+    // Vencimento / situação da venda
+    checkY(8);
+    doc.setFontSize(7);
+    if (s.overdue) doc.setTextColor(200, 30, 30); else doc.setTextColor(110);
+    doc.text(`Vencimento: ${due ?? 'sem data'}  ·  ${status}`, C_DESC, y);
     doc.setTextColor(0);
-    doc.text(fmt(s.net_total), C_PEND, y, { align: 'right' });
-    y += 4.5;
-
-    if (s.amount_paid > 0) {
-      checkY(6);
-      doc.setTextColor(80);
-      doc.text('Já recebido:', 102, y, { align: 'right' });
-      doc.setTextColor(22, 163, 74);
-      doc.text(fmt(s.amount_paid), C_PEND, y, { align: 'right' });
-      doc.setTextColor(0);
-      y += 4.5;
-    }
-
-    checkY(6);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
-    doc.setTextColor(200, 30, 30);
-    doc.text('Pendente:', 102, y, { align: 'right' });
-    doc.text(fmt(s.amount_pending), C_PEND, y, { align: 'right' });
-    doc.setTextColor(0); doc.setFont('helvetica', 'normal');
     y += 3;
 
-    doc.setDrawColor(220); doc.line(MARGIN, y, C_RIGHT, y);
+    doc.setDrawColor(225); doc.line(MARGIN, y, C_RIGHT, y);
     y += 5;
   }
 
@@ -190,11 +166,13 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
   checkY(20);
   doc.setDrawColor(180); doc.line(MARGIN, y - 2, C_RIGHT, y - 2);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.text('TOTAL EM ABERTO:', C_RIGHT - 48, y + 5);
+  doc.setTextColor(0);
+  doc.text('TOTAL EM ABERTO:', C_RIGHT - 34, y + 5, { align: 'right' });
   doc.setTextColor(220, 38, 38);
   doc.text(fmt(totalPending), C_RIGHT, y + 5, { align: 'right' });
   doc.setTextColor(0);
   y += 12;
+
 
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
   doc.text(`Quantidade de vendas: ${p.sales.length}`, C_RIGHT, y, { align: 'right' });

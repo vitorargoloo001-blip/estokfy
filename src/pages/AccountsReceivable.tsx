@@ -22,7 +22,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
-import { generateCustomerStatementPDF, statementFileName, type StatementSale } from '@/lib/customerStatementPdf';
+import { generateCustomerStatementPDF, statementFileName, type StatementSale, type StatementItem } from '@/lib/customerStatementPdf';
 import { downloadCsv } from '@/lib/receipt';
 import { toast } from 'sonner';
 
@@ -250,6 +250,43 @@ export default function AccountsReceivable() {
   const itemBalance = (it: SaleItemLite): number => {
     const lineTotal = Number(it.line_total);
     return Math.max(0, cents(lineTotal) - cents(itemPaid[it.id] || 0)) / 100;
+  };
+
+  // Itens do extrato: usa o saldo real por item quando bate com a venda; senão rateia o saldo da venda
+  const statementItems = (s: PendingSale): StatementItem[] => {
+    const items = s.sale_items || [];
+    if (items.length === 0) return [];
+    if (!itemsLoading && !itemsError && itemBalancesMatch(Number(s.amount_pending), items, itemPaid)) {
+      return items.map((it) => ({
+        name: itemName(it),
+        qty: it.qty,
+        unit_price: Number(it.unit_price),
+        line_total: Number(it.line_total),
+        amount_paid: itemPaid[it.id] || 0,
+        amount_pending: itemBalance(it),
+      }));
+    }
+    const sumLines = items.reduce((t, it) => t + cents(Number(it.line_total)), 0);
+    const share = (total: number) => {
+      const target = cents(total);
+      let left = target;
+      return items.map((it, i) => {
+        const v = i === items.length - 1 ? left : Math.round(target * (sumLines > 0 ? cents(Number(it.line_total)) / sumLines : 1 / items.length));
+        left -= v;
+        return v / 100;
+      });
+    };
+    const sold = share(Number(s.net_total));
+    const paid = share(Number(s.amount_paid));
+    const pend = share(Number(s.amount_pending));
+    return items.map((it, i) => ({
+      name: itemName(it),
+      qty: it.qty,
+      unit_price: Number(it.unit_price),
+      line_total: sold[i],
+      amount_paid: paid[i],
+      amount_pending: pend[i],
+    }));
   };
 
   const itemSettleGroups: SettleSaleGroup[] = (selected?.sales || [])
@@ -894,14 +931,7 @@ export default function AccountsReceivable() {
                 amount_pending: Number(s.amount_pending),
                 payment_status: s.payment_status,
                 overdue: !!isOverdue(s),
-                items: itemBalancesReady ? (s.sale_items || []).map((it) => ({
-                  name: itemName(it),
-                  qty: it.qty,
-                  unit_price: Number(it.unit_price),
-                  line_total: Number(it.line_total),
-                  amount_paid: itemPaid[it.id] || 0,
-                  amount_pending: itemBalance(it),
-                })) : [],
+                items: statementItems(s),
               }));
 
               const doc = generateCustomerStatementPDF({
