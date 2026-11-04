@@ -9,6 +9,7 @@ export interface ReceiptItem {
   qty: number;
   unit_price: number;
   line_total: number;
+  is_gift?: boolean;
 }
 
 export interface ReceiptData {
@@ -60,7 +61,7 @@ export function generateReceiptPdfA4(data: ReceiptData): jsPDF {
       it.name,
       String(it.qty),
       fmtBRL(it.unit_price),
-      fmtBRL(it.line_total),
+      it.is_gift ? 'BRINDE' : fmtBRL(it.line_total),
     ]),
     styles: { fontSize: 9 },
     headStyles: { fillColor: [59, 130, 246] },
@@ -105,7 +106,7 @@ export function buildReceiptText(data: ReceiptData): string {
   lines.push('');
   lines.push('— Itens —');
   data.items.forEach(it => {
-    lines.push(`${it.qty}x ${it.name} — ${fmtBRL(it.line_total)}`);
+    lines.push(`${it.qty}x ${it.name} — ${it.is_gift ? 'BRINDE' : fmtBRL(it.line_total)}`);
   });
   lines.push('');
   lines.push(`Subtotal: ${fmtBRL(data.gross)}`);
@@ -139,10 +140,10 @@ export function printThermalReceipt(data: ReceiptData, opts: ThermalPrintOptions
     if (isNarrow) {
       return `<div class="item">
         <div class="row"><span class="grow">${escapeHtml(it.name)}</span></div>
-        <div class="row muted"><span>${it.qty} x ${fmtBRL(it.unit_price)}</span><span>${fmtBRL(it.line_total)}</span></div>
+        <div class="row muted"><span>${it.qty} x ${fmtBRL(it.unit_price)}</span><span>${it.is_gift ? 'BRINDE' : fmtBRL(it.line_total)}</span></div>
       </div>`;
     }
-    return `<div class="row"><span>${it.qty}x ${escapeHtml(it.name)}</span><span>${fmtBRL(it.line_total)}</span></div>`;
+    return `<div class="row"><span>${it.qty}x ${escapeHtml(it.name)}</span><span>${it.is_gift ? 'BRINDE' : fmtBRL(it.line_total)}</span></div>`;
   }).join('');
 
   const ticket = `

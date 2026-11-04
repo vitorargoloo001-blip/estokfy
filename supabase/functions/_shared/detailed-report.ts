@@ -44,7 +44,7 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
         .eq("store_id", storeId)
         .gte("sale_date", from).lte("sale_date", to).order("id")),
       read(() => svc.from("sale_items")
-        .select("sale_id, product_id, qty, unit_price, line_total, product_name_snapshot, product_sku_snapshot, product_category_snapshot, sales!inner(store_id, sale_date, status)")
+        .select("sale_id, product_id, qty, unit_price, unit_cost, line_total, is_gift, product_name_snapshot, product_sku_snapshot, product_category_snapshot, sales!inner(store_id, sale_date, status)")
         .eq("sales.store_id", storeId)
         .gte("sales.sale_date", from).lte("sales.sale_date", to).order("sale_id").order("product_id")),
       read(() => svc.from("payments")
@@ -247,21 +247,38 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
     // Mapa sale_id -> forma primária (usado em productSold e timeline)
     const _saleMethodMap = new Map<string, string>(primaryMethodBySale);
 
-    const itemsBySale = new Map<string, Array<{ id: string; product_id: string | null; name: string; sku: string; qty: number; unit_price: number; line_total: number }>>();
+    const itemsBySale = new Map<string, Array<{ id: string; product_id: string | null; name: string; sku: string; qty: number; unit_price: number; line_total: number; is_gift?: boolean }>>();
     for (const it of saleItems) {
       if (!realizedSaleIdSet.has(it.sale_id)) continue;
       const product = productMap.get(it.product_id);
       const items = itemsBySale.get(it.sale_id) || [];
       items.push({ id: `${it.sale_id}:${it.product_id}`, product_id: it.product_id, name: it.product_name_snapshot || product?.name || "Produto não identificado",
-        sku: it.product_sku_snapshot || product?.sku || "-", qty: num(it.qty), unit_price: round2(num(it.unit_price)), line_total: round2(num(it.line_total)) });
+        sku: it.product_sku_snapshot || product?.sku || "-", qty: num(it.qty), unit_price: round2(num(it.unit_price)), line_total: round2(num(it.line_total)), ...(it.is_gift ? { is_gift: true } : {}) });
       itemsBySale.set(it.sale_id, items);
     }
 
     const productSold: Record<string, { sku: string; name: string; qty: number; revenue: number; methods: Record<string, number> }> = {};
     const categorySold: Record<string, { category: string; qty: number; revenue: number }> = {};
+    const realizedSaleById = new Map<string, any>(realizedSales.map((r: any) => [r.id, r]));
+    const gifts: Array<{ sale_id: string; sale_date: string; customer: string; product: string; sku: string; qty: number; value: number; cost: number }> = [];
     for (const it of saleItems) {
       if (!realizedSaleIdSet.has(it.sale_id)) continue;
       const p: any = productMap.get(it.product_id);
+      if ((it as any).is_gift) {
+        // Brinde não entra em receita/ranking de produtos; vai para a lista própria de brindes
+        const sale: any = realizedSaleById.get(it.sale_id);
+        gifts.push({
+          sale_id: it.sale_id,
+          sale_date: sale?.sale_date || reportDay(sale?.created_at),
+          customer: customerMap.get(sale?.customer_id || "") || "Sem cliente",
+          product: (it as any).product_name_snapshot || p?.name || "Produto não identificado",
+          sku: (it as any).product_sku_snapshot || p?.sku || "-",
+          qty: num(it.qty),
+          value: round2(num(it.unit_price) * num(it.qty)),
+          cost: round2(num((it as any).unit_cost) * num(it.qty)),
+        });
+        continue;
+      }
       const snapName = (it as any).product_name_snapshot as string | null;
       const snapSku = (it as any).product_sku_snapshot as string | null;
       const snapCat = (it as any).product_category_snapshot as string | null;
@@ -579,6 +596,9 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
         overdue_amount: round2(overdueAmount),
         // Cash purchases and cash refunds are already in cash_entries expenses.
         net_real_total: round2(balance),
+        gifts_qty: gifts.reduce((t, g) => t + g.qty, 0),
+        gifts_value: round2(gifts.reduce((t, g) => t + g.value, 0)),
+        gifts_cost: round2(gifts.reduce((t, g) => t + g.cost, 0)),
       },
       sales: {
         count: salesCount,
@@ -594,6 +614,7 @@ export async function loadDetailedReport(svc: ReportClient, storeId: string, opt
         // BLOCO A: formas de pagamento das vendas realizadas no período (por sale_date)
         payment_methods_realized: paymentMethodsRealized,
 
+        gifts,
         top_products: topProducts.map(p => ({ ...p, revenue: round2(p.revenue) })),
         by_category: salesByCategory.map(c => ({ ...c, revenue: round2(c.revenue) })),
         list: realizedSales.map(s => ({

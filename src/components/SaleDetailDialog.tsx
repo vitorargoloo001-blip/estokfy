@@ -28,6 +28,7 @@ interface SaleItem {
   unit_price: number;
   unit_cost: number;
   line_total: number;
+  is_gift?: boolean;
   products: { name: string } | null;
 }
 
@@ -225,10 +226,10 @@ export default function SaleDetailDialog({ saleId, open, onOpenChange, onSettled
                 <TableBody>
                   {items.map(item => (
                     <TableRow key={item.id}>
-                      <TableCell className="text-sm font-medium">{item.products?.name || '-'}</TableCell>
+                      <TableCell className="text-sm font-medium">{item.products?.name || '-'}{item.is_gift && <Badge className="ml-2 text-[10px]">BRINDE</Badge>}</TableCell>
                       <TableCell className="text-right text-sm">{item.qty}</TableCell>
                       <TableCell className="text-right text-sm">{fmt(item.unit_price)}</TableCell>
-                      <TableCell className="text-right text-sm font-medium">{fmt(item.line_total)}</TableCell>
+                      <TableCell className="text-right text-sm font-medium">{item.is_gift ? 'BRINDE' : fmt(item.line_total)}</TableCell>
                     </TableRow>
                   ))}
                   {items.length === 0 && (

@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Trash2, ShoppingCart, Search, Plus, CheckCircle2, CalendarIcon, Clock } from 'lucide-react';
+import { Trash2, ShoppingCart, Search, Plus, CheckCircle2, CalendarIcon, Clock, Gift } from 'lucide-react';
 import { toast } from 'sonner';
 import { maskPhone, validatePhone } from '@/lib/masks';
 import { cn } from '@/lib/utils';
@@ -25,7 +25,7 @@ import { printThermalReceipt, type ReceiptData } from '@/lib/receipt';
 import PixChargeDialog from '@/components/PixChargeDialog';
 
 interface Product { id: string; sku: string; name: string; brand: string | null; model: string | null; sale_price: number; on_hand: number; category_name?: string | null; }
-interface SaleItem { product_id: string; product_name: string; qty: number; unit_price: number; available: number; }
+interface SaleItem { product_id: string; product_name: string; qty: number; unit_price: number; available: number; is_gift?: boolean; }
 interface Customer { id: string; name: string; phone: string | null; }
 interface PaymentLine { method: string; amount: number; }
 
@@ -263,7 +263,10 @@ export default function NewSale() {
 
   const removeItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
 
-  const subtotal = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
+  // Brinde: mantém o preço normal, mas não entra no total cobrado do cliente
+  const toggleGift = (idx: number) => setItems(items.map((it, i) => i === idx ? { ...it, is_gift: !it.is_gift } : it));
+  const giftValue = items.reduce((s, i) => s + (i.is_gift ? i.qty * i.unit_price : 0), 0);
+  const subtotal = items.reduce((s, i) => s + (i.is_gift ? 0 : i.qty * i.unit_price), 0);
   const total = Math.max(0, subtotal - discount + shippingFee);
   const paymentsSum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const cashSum = payments.filter(p => p.method === 'cash').reduce((s, p) => s + (Number(p.amount) || 0), 0);
@@ -468,7 +471,7 @@ export default function NewSale() {
       store_id: storeId,
       customer_id: resolvedCustomerId,
       discount,
-      items: items.map(i => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price })),
+      items: items.map(i => ({ product_id: i.product_id, qty: i.qty, unit_price: i.unit_price, ...(i.is_gift ? { is_gift: true } : {}) })),
       payments: cleanPayments.map(p => (p.method === 'pix_qr' ? { ...p, method: 'pending' } : p)),
       // Frete é somado ao total independente do método de entrega (o campo
       // fica sempre visível na tela, mesmo em "Retirada") — só omitimos o
@@ -500,7 +503,7 @@ export default function NewSale() {
         try {
           const [storeRes, itemsRes, payRes] = await Promise.all([
             supabase.from('stores').select('name, phone, whatsapp').eq('id', storeId).maybeSingle(),
-            supabase.from('sale_items').select('qty, unit_price, line_total, products(name)').eq('sale_id', body.sale_id),
+            supabase.from('sale_items').select('qty, unit_price, line_total, is_gift, products(name)').eq('sale_id', body.sale_id),
             supabase.from('payments').select('method').eq('sale_id', body.sale_id),
           ]);
           const customer = customerId && customerId !== 'none'
@@ -519,6 +522,7 @@ export default function NewSale() {
               qty: it.qty,
               unit_price: Number(it.unit_price),
               line_total: Number(it.line_total),
+              is_gift: !!it.is_gift,
             })),
             gross: subtotal, net: total, discount, shipping: shippingFee,
             amountPaid: paymentsSum - awaitingSum, amountPending: awaitingSum,
@@ -689,7 +693,12 @@ export default function NewSale() {
                         <Input type="number" min={1} max={item.available} value={item.qty} onChange={e => updateItem(idx, 'qty', parseInt(e.target.value) || 1)} className="w-16 h-9 text-center" />
                         <span className="text-xs text-muted-foreground">×</span>
                         <Input type="number" step="0.01" min={0} value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-24 h-9 text-right" />
-                        <span className="text-sm font-medium ml-auto">{fmt(item.qty * item.unit_price)}</span>
+                        <Button type="button" size="sm" variant={item.is_gift ? 'default' : 'outline'} className="h-9 gap-1 px-2" onClick={() => toggleGift(idx)} title="Marcar como brinde (não é cobrado do cliente)">
+                          <Gift className="h-4 w-4" /><span className="text-xs">Brinde</span>
+                        </Button>
+                        {item.is_gift
+                          ? <span className="text-sm font-medium ml-auto text-primary">BRINDE <span className="text-xs text-muted-foreground line-through">{fmt(item.qty * item.unit_price)}</span></span>
+                          : <span className="text-sm font-medium ml-auto">{fmt(item.qty * item.unit_price)}</span>}
                       </div>
                     </div>
                   ))}
@@ -923,6 +932,7 @@ export default function NewSale() {
 
               <div className="rounded-lg bg-muted/50 p-3 space-y-1.5">
                 <div className="flex justify-between text-sm"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
+                {giftValue > 0 && <div className="flex justify-between text-sm text-primary"><span>Brindes (não cobrado)</span><span>{fmt(giftValue)}</span></div>}
                 {discount > 0 && <div className="flex justify-between text-sm text-destructive"><span>Desconto</span><span>-{fmt(discount)}</span></div>}
                 {shippingFee > 0 && <div className="flex justify-between text-sm"><span>Frete</span><span>{fmt(shippingFee)}</span></div>}
                 <div className="flex justify-between text-base font-bold pt-1.5 border-t"><span>Total</span><span>{fmt(total)}</span></div>

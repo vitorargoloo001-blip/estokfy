@@ -53,6 +53,7 @@ interface ItemRow {
   product_id: string;
   qty: number;
   unit_price: number;
+  is_gift?: boolean;
   product_name?: string;
   on_hand?: number;
 }
@@ -144,6 +145,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
       setOrigSale(sale);
       const oItems: ItemRow[] = (si.data || []).map((r: any) => ({
         product_id: r.product_id, qty: r.qty, unit_price: Number(r.unit_price),
+        ...(r.is_gift ? { is_gift: true } : {}),
         product_name: r.products?.name, on_hand: r.products?.on_hand,
       }));
       setOrigItems(oItems);
@@ -178,7 +180,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
     return () => { cancelled = true; };
   }, [open, saleId, profile]);
 
-  const subtotal = useMemo(() => items.reduce((s, i) => s + (Number(i.unit_price) || 0) * (Number(i.qty) || 0), 0), [items]);
+  const subtotal = useMemo(() => items.reduce((s, i) => s + (i.is_gift ? 0 : (Number(i.unit_price) || 0) * (Number(i.qty) || 0)), 0), [items]);
   const total = Math.max(0, subtotal - (Number(discount) || 0) + (Number(shipping) || 0));
 
   const updateItem = (idx: number, patch: Partial<ItemRow>) => {
@@ -278,6 +280,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
           product_id: i.product_id,
           qty: Number(i.qty),
           unit_price: Number(i.unit_price),
+          ...(i.is_gift ? { is_gift: true } : {}),
         })) as any,
         p_allow_negative_stock: allowNegative,
         p_confirm_revert_payment: willRevertPayment && confirmRevert,
@@ -480,7 +483,7 @@ export default function EditSaleDialog({ saleId, open, onOpenChange, onSaved }: 
                       <Input type="number" min="1" value={it.qty} onChange={e => updateItem(idx, { qty: parseInt(e.target.value) || 0 })} className="h-9" />
                     </div>
                     <div className="col-span-6 sm:col-span-3 space-y-1">
-                      <Label className="text-xs">Unitário</Label>
+                      <Label className="text-xs">Unitário{it.is_gift ? ' · BRINDE (não cobrado)' : ''}</Label>
                       <Input type="number" step="0.01" min="0" value={it.unit_price} onChange={e => updateItem(idx, { unit_price: parseFloat(e.target.value) || 0 })} className="h-9" />
                     </div>
                     <div className="col-span-2 sm:col-span-1 flex justify-end">

@@ -49,6 +49,7 @@ interface SalesData {
   payment_methods: Record<string, { amount: number; count: number }>;
   payment_methods_realized?: Record<string, { amount: number; count: number }>;
   top_products: { sku: string; name: string; qty: number; revenue: number; methods?: string[] }[];
+  gifts?: { sale_id: string; sale_date: string; customer: string; product: string; sku: string; qty: number; value: number; cost: number }[];
   by_category?: { category: string; qty: number; revenue: number }[];
   list: (ReportSale & { gross: number; discount: number; shipping: number; net: number; profit: number; payment_method: string | null; payment_status?: string; amount_paid?: number; amount_pending?: number; due_date?: string | null; notes?: string | null })[];
 }
@@ -548,6 +549,21 @@ export default function Reports() {
       headStyles: { fillColor: [37, 99, 235] }, styles: { fontSize: 9 }, columnStyles: { 1: { halign: 'right' } },
     });
     afterTable();
+
+    // === BRINDES ENTREGUES ===
+    if (data.sales.gifts?.length) {
+      section('Brindes entregues');
+      autoTable(doc, {
+        startY: y + 4, theme: 'striped',
+        head: [['Data', 'Cliente', 'Produto', 'Qtd', 'Valor', 'Custo']],
+        body: data.sales.gifts.map(g => [
+          new Date(g.sale_date + 'T00:00:00').toLocaleDateString('pt-BR'), g.customer, g.product, String(g.qty), fmt(g.value), fmt(g.cost),
+        ]),
+        headStyles: { fillColor: [37, 99, 235] }, styles: { fontSize: 9 },
+        columnStyles: { 3: { halign: 'center' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+      });
+      afterTable();
+    }
 
     // === 4. PRODUTOS MAIS VENDIDOS ===
     if (data.sales.top_products.length) {
@@ -1271,6 +1287,46 @@ export default function Reports() {
 
 
 
+
+          {/* ============= BRINDES ENTREGUES ============= */}
+          {!!data.sales.gifts?.length && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Brindes entregues</h2>
+                <span className="text-[11px] text-muted-foreground">
+                  {data.sales.gifts.reduce((t, g) => t + g.qty, 0)} un · custo {fmt(data.sales.gifts.reduce((t, g) => t + g.cost, 0))}
+                </span>
+              </div>
+              <Card>
+                <CardContent className="p-0 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-b border-border hover:bg-transparent bg-muted/30">
+                          <TableHead className="h-9 text-[11px] uppercase tracking-wider">Data</TableHead>
+                          <TableHead className="h-9 text-[11px] uppercase tracking-wider">Cliente</TableHead>
+                          <TableHead className="h-9 text-[11px] uppercase tracking-wider">Produto</TableHead>
+                          <TableHead className="h-9 text-[11px] uppercase tracking-wider text-right">Qtd</TableHead>
+                          <TableHead className="h-9 text-[11px] uppercase tracking-wider text-right">Custo</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {data.sales.gifts.map((g, i) => (
+                          <TableRow key={`${g.sale_id}-${i}`} className="border-b-0 odd:bg-muted/20">
+                            <TableCell className="text-sm py-2.5">{new Date(g.sale_date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
+                            <TableCell className="text-sm py-2.5">{g.customer}</TableCell>
+                            <TableCell className="text-sm font-medium py-2.5">{g.product}</TableCell>
+                            <TableCell className="text-sm text-right py-2.5">{g.qty}</TableCell>
+                            <TableCell className="text-sm text-right py-2.5">{fmt(g.cost)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+          )}
 
           {/* ============= 6. PRODUTOS MAIS VENDIDOS ============= */}
           {data.sales.top_products.length > 0 && (

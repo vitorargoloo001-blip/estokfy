@@ -32,7 +32,7 @@ export default function ReceiptActions({ saleId, variant = 'outline', size = 'sm
         supabase.from('sales')
           .select('id, created_at, gross_total, net_total, discount_total, shipping_fee, amount_paid, amount_pending, payment_status, notes, created_by, customers(name, phone)')
           .eq('id', saleId).maybeSingle(),
-        supabase.from('sale_items').select('qty, unit_price, line_total, products(name)').eq('sale_id', saleId),
+        supabase.from('sale_items').select('qty, unit_price, line_total, is_gift, products(name)').eq('sale_id', saleId),
         supabase.from('payments').select('method').eq('sale_id', saleId),
         supabase.from('stores').select('name, phone, whatsapp').eq('id', profile.store_id).maybeSingle(),
       ]);
@@ -64,6 +64,7 @@ export default function ReceiptActions({ saleId, variant = 'outline', size = 'sm
           qty: it.qty,
           unit_price: Number(it.unit_price),
           line_total: Number(it.line_total),
+          is_gift: !!it.is_gift,
         })),
         gross: Number(s.gross_total || 0),
         net: Number(s.net_total || 0),
