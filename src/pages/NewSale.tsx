@@ -117,6 +117,7 @@ export default function NewSale() {
   // reverte qualquer linha de crédito para PIX antes de deixar órfã.
   useEffect(() => {
     if (customerCredit > 0) return;
+    setItems(prev => prev.some(i => i.is_gift) ? prev.map(i => i.is_gift ? { ...i, is_gift: false } : i) : prev);
     setPayments(prev => {
       if (!prev.some(p => p.method === 'credit')) return prev;
       return prev.map(p => p.method === 'credit' ? { ...p, method: 'pix' } : p);
@@ -264,7 +265,16 @@ export default function NewSale() {
   const removeItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
 
   // Brinde: mantém o preço normal, mas não entra no total cobrado do cliente
-  const toggleGift = (idx: number) => setItems(items.map((it, i) => i === idx ? { ...it, is_gift: !it.is_gift } : it));
+  // Brinde só para cliente com crédito de meta; o valor sai desse crédito
+  const toggleGift = (idx: number) => {
+    const item = items[idx];
+    if (!item.is_gift) {
+      if (customerCredit <= 0) { toast.error('Brinde só para cliente que bateu a meta (com crédito disponível).'); return; }
+      const novo = giftValue + item.qty * item.unit_price;
+      if (novo > customerCredit + 0.01) { toast.error(`Crédito de meta insuficiente: disponível ${fmt(customerCredit)}, brindes ${fmt(novo)}.`); return; }
+    }
+    setItems(items.map((it, i) => i === idx ? { ...it, is_gift: !it.is_gift } : it));
+  };
   const giftValue = items.reduce((s, i) => s + (i.is_gift ? i.qty * i.unit_price : 0), 0);
   const subtotal = items.reduce((s, i) => s + (i.is_gift ? 0 : i.qty * i.unit_price), 0);
   const total = Math.max(0, subtotal - discount + shippingFee);
@@ -398,8 +408,8 @@ export default function NewSale() {
     if (creditUsed > 0 && !resolvedCustomerId) {
       toast.error('Selecione um cliente para usar crédito como pagamento.'); return;
     }
-    if (creditUsed > customerCredit + 0.01) {
-      toast.error(`Crédito insuficiente: disponível ${fmt(customerCredit)}, informado ${fmt(creditUsed)}.`); return;
+    if (creditUsed + giftValue > customerCredit + 0.01) {
+      toast.error(`Crédito insuficiente: disponível ${fmt(customerCredit)}, informado ${fmt(creditUsed)}${giftValue > 0 ? ` + brindes ${fmt(giftValue)}` : ''}.`); return;
     }
 
     // V12: venda a prazo exige cliente vinculado (sem cliente, não há como cobrar depois)
@@ -693,7 +703,7 @@ export default function NewSale() {
                         <Input type="number" min={1} max={item.available} value={item.qty} onChange={e => updateItem(idx, 'qty', parseInt(e.target.value) || 1)} className="w-16 h-9 text-center" />
                         <span className="text-xs text-muted-foreground">×</span>
                         <Input type="number" step="0.01" min={0} value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-24 h-9 text-right" />
-                        <Button type="button" size="sm" variant={item.is_gift ? 'default' : 'outline'} className="h-9 gap-1 px-2" onClick={() => toggleGift(idx)} title="Marcar como brinde (não é cobrado do cliente)">
+                        <Button type="button" size="sm" variant={item.is_gift ? 'default' : 'outline'} className="h-9 gap-1 px-2" disabled={!item.is_gift && customerCredit <= 0} onClick={() => toggleGift(idx)} title={customerCredit > 0 ? 'Brinde: não é cobrado; o valor sai do crédito de meta do cliente' : 'Brinde só para cliente que bateu a meta (selecione o cliente)'}>
                           <Gift className="h-4 w-4" /><span className="text-xs">Brinde</span>
                         </Button>
                         {item.is_gift
@@ -932,7 +942,7 @@ export default function NewSale() {
 
               <div className="rounded-lg bg-muted/50 p-3 space-y-1.5">
                 <div className="flex justify-between text-sm"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
-                {giftValue > 0 && <div className="flex justify-between text-sm text-primary"><span>Brindes (não cobrado)</span><span>{fmt(giftValue)}</span></div>}
+                {giftValue > 0 && <div className="flex justify-between text-sm text-primary"><span>Brindes (descontado do crédito de meta)</span><span>{fmt(giftValue)}</span></div>}
                 {discount > 0 && <div className="flex justify-between text-sm text-destructive"><span>Desconto</span><span>-{fmt(discount)}</span></div>}
                 {shippingFee > 0 && <div className="flex justify-between text-sm"><span>Frete</span><span>{fmt(shippingFee)}</span></div>}
                 <div className="flex justify-between text-base font-bold pt-1.5 border-t"><span>Total</span><span>{fmt(total)}</span></div>
