@@ -898,6 +898,7 @@ export default function AccountsReceivable() {
                   name: itemName(it),
                   qty: it.qty,
                   unit_price: Number(it.unit_price),
+                  line_total: Number(it.line_total),
                   amount_paid: itemPaid[it.id] || 0,
                   amount_pending: itemBalance(it),
                 })) : [],

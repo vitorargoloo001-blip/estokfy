@@ -7,6 +7,7 @@ export interface StatementItem {
   name: string;
   qty: number;
   unit_price: number;
+  line_total: number;
   amount_paid: number;
   amount_pending: number;
 }
@@ -36,9 +37,10 @@ const W = 210;
 const MAX_Y = PAGE_H - 18;
 
 const C_DESC  = MARGIN + 4;
-const C_QTY   = 96;
-const C_UNIT  = 120;
-const C_PAID  = 152;
+const C_DATE  = 100;
+const C_QTY   = 112;
+const C_UNIT  = 136;
+const C_PAID  = 159;
 const C_PEND  = 182;
 const C_RIGHT = W - MARGIN;
 
@@ -102,10 +104,11 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5);
   doc.setTextColor(80);
   doc.text('PRODUTO', C_DESC, y);
+  doc.text('COMPRA', C_DATE, y, { align: 'right' });
   doc.text('QTD', C_QTY, y, { align: 'right' });
-  doc.text('UNIT.', C_UNIT, y, { align: 'right' });
+  doc.text('VENDIDO', C_UNIT, y, { align: 'right' });
   doc.text('RECEBIDO', C_PAID, y, { align: 'right' });
-  doc.text('A RECEBER', C_PEND, y, { align: 'right' });
+  doc.text('PENDENTE', C_PEND, y, { align: 'right' });
   doc.setTextColor(0);
   y += 5;
   doc.setDrawColor(220); doc.line(MARGIN, y - 1, C_RIGHT, y - 1);
@@ -119,7 +122,8 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
     const date   = new Date(s.created_at).toLocaleDateString('pt-BR');
     const due    = s.due_date ? new Date(s.due_date + 'T00:00:00').toLocaleDateString('pt-BR') : '—';
     const status = s.overdue ? 'VENCIDA' : s.payment_status === 'partial' ? 'PARCIAL' : 'PENDENTE';
-    const items  = s.items || [];
+    // Só produtos que ainda têm valor a pagar
+    const items  = (s.items || []).filter((it) => it.amount_pending > 0);
 
     checkY(8 + items.length * 5 + 22);
 
@@ -138,16 +142,18 @@ export function generateCustomerStatementPDF(p: StatementPayload): jsPDF {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
     for (const it of items) {
       checkY(6);
-      const name = (doc.splitTextToSize(it.name, 68) as string[])[0];
-      doc.text(name, C_DESC, y);
+      const nameLines = (doc.splitTextToSize(it.name, 62) as string[]).slice(0, 2);
+      if (nameLines.length > 1) checkY(10);
+      doc.text(nameLines, C_DESC, y);
+      doc.text(date, C_DATE, y, { align: 'right' });
       doc.text(String(it.qty), C_QTY, y, { align: 'right' });
-      doc.text(fmt(it.unit_price), C_UNIT, y, { align: 'right' });
+      doc.text(fmt(it.line_total), C_UNIT, y, { align: 'right' });
       doc.setTextColor(22, 163, 74);
       doc.text(fmt(it.amount_paid), C_PAID, y, { align: 'right' });
       doc.setTextColor(it.amount_pending > 0 ? 200 : 0, it.amount_pending > 0 ? 30 : 0, it.amount_pending > 0 ? 30 : 0);
       doc.text(fmt(it.amount_pending), C_PEND, y, { align: 'right' });
       doc.setTextColor(0);
-      y += 5;
+      y += 5 * nameLines.length;
     }
 
     // Sale summary
